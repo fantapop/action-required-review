@@ -16931,7 +16931,7 @@ async function getRequirements() {
 			});
 		} else {
 			core.info("Parsing Codeowners")
-			requirements = await ParseCodeOwners(requirementsString, enforceOn);
+			requirements = ParseCodeOwners(requirementsString, enforceOn);
 		}
 
 		if (!Array.isArray(requirements)) {
