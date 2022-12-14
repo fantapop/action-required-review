@@ -3,21 +3,26 @@ const core = require('@actions/core');
 const yaml = require('js-yaml');
 const reporter = require('./reporter.js');
 const Requirement = require('./requirement.js');
-const ParseCodeOwners = require('./codeowners.js');
+const parseCodeOwners = require('./codeowners.js');
+
+// https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-location
+const VALID_CODEOWNERS_PATHS = [
+	'CODEOWNERS', '.github/CODEOWNERS', 'docs/CODEOWNERS',
+];
 
 /**
  * Load the requirements yaml file.
  *
  * @returns {Requirement[]} Requirements.
  */
-async function getRequirements() {
+function getRequirements() {
 	let requirementsString = core.getInput('requirements');
-	let enforceOnString = core.getInput('enforce_on')
-	let isYaml = true
-	var enforceOn
+	let enforceOnString = core.getInput('enforce_on');
+	let isCodeowners = false;
+	let enforceOn = false;
 
 	if (!enforceOnString) {
-		enforceOn = []
+		enforceOn = [];
 	} else {
 
 		enforceOn = yaml.load(enforceOnString, {
@@ -33,7 +38,6 @@ async function getRequirements() {
 
 	if (!requirementsString) {
 		const filename = core.getInput('requirements-file');
-
 		if (!filename) {
 			throw new reporter.ReportError(
 				'Requirements are not found',
@@ -42,16 +46,19 @@ async function getRequirements() {
 			);
 		}
 
-		if (filename.trim() === 'CODEOWNERS') {
-			isYaml = false
+		const trimmedFilename = filename.trim();
+
+		if (VALID_CODEOWNERS_PATHS.includes(trimmedFilename)) {
+			isCodeowners = true
 		}
 
-
 		try {
-			requirementsString = fs.readFileSync(filename, 'utf8');
+			core.info('working directory is: ' + process.cwd())
+			core.info('ls .: ' + fs.readdirSync('.'))
+			requirementsString = fs.readFileSync(trimmedFilename, 'utf8');
 		} catch (error) {
 			throw new reporter.ReportError(
-				`Requirements file ${filename} could not be read`,
+				`Requirements file ${trimmedFilename} could not be read`,
 				error,
 				{}
 			);
@@ -62,15 +69,17 @@ async function getRequirements() {
 
 	var requirements = []
 	try {
-		if (isYaml) {
+		if (isCodeowners) {
+			core.info("Parsing Codeowners")
+			requirements = parseCodeOwners(requirementsString, enforceOn);
+		}
+		else {
 			core.info("Parsing Yaml")
 			requirements = yaml.load(requirementsString, {
 				onWarning: w => core.warning(`Yaml: ${w.message}`),
 			});
-		} else {
-			core.info("Parsing Codeowners")
-			requirements = ParseCodeOwners(requirementsString, enforceOn);
 		}
+		core.debug("read requirements: ", requirements)
 
 		if (!Array.isArray(requirements)) {
 			throw new Error(`Requirements file does not contain an array. Input: ${requirements}`);
@@ -91,7 +100,7 @@ async function getRequirements() {
  */
 async function main() {
 	try {
-		const requirements = await getRequirements();
+		const requirements = getRequirements();
 		core.startGroup(`Loaded ${requirements.length} review requirement(s)`);
 
 		const reviewers = await require('./reviewers.js')();

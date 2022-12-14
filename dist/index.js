@@ -16227,13 +16227,12 @@ function wrappy (fn, cb) {
 /***/ 8826:
 /***/ ((module) => {
 
-// improve path mapping
-function ParseLine(line, enforceOn) {
+function parseLine(line, enforceOn) {
     const lineList = line.split(/(\s+)/).filter(
         e => { return e.trim().length > 0; }
     );
     const linePath = lineList[0]
-    if (enforceOn.includes(linePath)) {
+    if (enforceOn === linePath) {
         const result = {
             "paths": [linePath],
             "teams": lineList.slice(1)
@@ -16244,14 +16243,15 @@ function ParseLine(line, enforceOn) {
     return null
 }
 
-async function ParseCodeOwners(data, enforceOn) {
+function parseCodeOwners(data, enforceOn) {
     const dataArray = data.split('\n');
-    const result = await Promise.all(dataArray.map(async line => ParseLine(line, enforceOn)));
+    const result = Promise.all(dataArray.map(line => parseLine(line, enforceOn)));
 
     return result.filter(value => !!value);
 }
 
-module.exports = ParseCodeOwners;
+module.exports = parseCodeOwners;
+
 
 /***/ }),
 
@@ -16865,21 +16865,26 @@ const core = __nccwpck_require__(2186);
 const yaml = __nccwpck_require__(1917);
 const reporter = __nccwpck_require__(3719);
 const Requirement = __nccwpck_require__(2720);
-const ParseCodeOwners = __nccwpck_require__(8826);
+const parseCodeOwners = __nccwpck_require__(8826);
+
+// https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-location
+const VALID_CODEOWNERS_PATHS = [
+	'CODEOWNERS', '.github/CODEOWNERS', 'docs/CODEOWNERS',
+];
 
 /**
  * Load the requirements yaml file.
  *
  * @returns {Requirement[]} Requirements.
  */
-async function getRequirements() {
+function getRequirements() {
 	let requirementsString = core.getInput('requirements');
-	let enforceOnString = core.getInput('enforce_on')
-	let isYaml = true
-	var enforceOn
+	let enforceOnString = core.getInput('enforce_on');
+	let isCodeowners = false;
+	let enforceOn = false;
 
 	if (!enforceOnString) {
-		enforceOn = []
+		enforceOn = [];
 	} else {
 
 		enforceOn = yaml.load(enforceOnString, {
@@ -16895,7 +16900,6 @@ async function getRequirements() {
 
 	if (!requirementsString) {
 		const filename = core.getInput('requirements-file');
-
 		if (!filename) {
 			throw new reporter.ReportError(
 				'Requirements are not found',
@@ -16904,16 +16908,19 @@ async function getRequirements() {
 			);
 		}
 
-		if (filename.trim() === 'CODEOWNERS') {
-			isYaml = false
+		const trimmedFilename = filename.trim();
+
+		if (VALID_CODEOWNERS_PATHS.includes(trimmedFilename)) {
+			isCodeowners = true
 		}
 
-
 		try {
-			requirementsString = fs.readFileSync(filename, 'utf8');
+			core.info('working directory is: ' + process.cwd())
+			core.info('ls .: ' + fs.readdirSync('.'))
+			requirementsString = fs.readFileSync(trimmedFilename, 'utf8');
 		} catch (error) {
 			throw new reporter.ReportError(
-				`Requirements file ${filename} could not be read`,
+				`Requirements file ${trimmedFilename} could not be read`,
 				error,
 				{}
 			);
@@ -16924,15 +16931,17 @@ async function getRequirements() {
 
 	var requirements = []
 	try {
-		if (isYaml) {
+		if (isCodeowners) {
+			core.info("Parsing Codeowners")
+			requirements = parseCodeOwners(requirementsString, enforceOn);
+		}
+		else {
 			core.info("Parsing Yaml")
 			requirements = yaml.load(requirementsString, {
 				onWarning: w => core.warning(`Yaml: ${w.message}`),
 			});
-		} else {
-			core.info("Parsing Codeowners")
-			requirements = ParseCodeOwners(requirementsString, enforceOn);
 		}
+		core.debug("read requirements: ", requirements)
 
 		if (!Array.isArray(requirements)) {
 			throw new Error(`Requirements file does not contain an array. Input: ${requirements}`);
@@ -16953,7 +16962,7 @@ async function getRequirements() {
  */
 async function main() {
 	try {
-		const requirements = await getRequirements();
+		const requirements = getRequirements();
 		core.startGroup(`Loaded ${requirements.length} review requirement(s)`);
 
 		const reviewers = await __nccwpck_require__(6559)();

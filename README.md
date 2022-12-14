@@ -54,8 +54,19 @@ This action is intended to be triggered by the `pull_request_review` event.
           - maintenance
 
     # Specify the path to the requirements file. See below for the format of
-    # this file.
+    # this file. If the path for this file points to one of the locations of the
+    # CODEOWNERS file, use this file in combination with the enforce-on array to
+    # build the requirements.
     requirements-file: .github/required-review.yaml
+
+    # Specify paths from the CODEOWNERS file to enforce as review requirements.
+    # This allows having a CODEOWNERS file which adds teams for review but only
+    # forces a review for certain paths. Paths must match the codeowners file
+    # exactly
+    # TODO (fitzner): add warning for paths here that don't match a codeowners line
+    enforce-on:
+      - 'docs/'
+      - 'path2/file.txt'
 
     # Specify the "context" for the status to set. This is what shows up in the
     # PR's checks list.
