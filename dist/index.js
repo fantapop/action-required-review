@@ -16225,14 +16225,17 @@ function wrappy (fn, cb) {
 /***/ }),
 
 /***/ 8826:
-/***/ ((module) => {
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const core = __nccwpck_require__(2186);
 
 function buildRequirement(line, enforceOn) {
-    const [path, ...rest] = line.trim().split(/\s+/)
+    const [path, ...teams] = line.trim().split(/\s+/)
+    core.debug(`parsed line from codeowners: path: ${path}, teams: ${teams}`)
     if (enforceOn === path) {
         return {
-            "paths": [linePath],
-            "teams": rest,
+            "paths": [path],
+            teams,
         };
     }
 
@@ -16241,6 +16244,7 @@ function buildRequirement(line, enforceOn) {
 
 function parseCodeOwners(data, enforceOn) {
     const lines = data.split('\n');
+    core.debug(`about to parse code owners: ${lines.join('\n')}`)
     return lines.map(line => buildRequirement(line, enforceOn)).filter(value => !!value);
 }
 
