@@ -16895,7 +16895,6 @@ function getRequirements() {
 	let requirementsString = core.getInput('requirements');
 	let enforceOnString = core.getInput('enforce_on');
 	let isCodeowners = false;
-	let enforceOn = false;
 
 	if (!enforceOnString) {
 		enforceOnPaths = [];
@@ -16908,7 +16907,9 @@ function getRequirements() {
 		if (!Array.isArray(enforceOnPaths)) {
 			throw new Error('enforce_on should be an array');
 		}
-
+		if (core.isDebug) {
+			core.debug("using enforce-on list: " + JSON.stringify(enforceOnPaths))
+		}
 	}
 
 
