@@ -16893,7 +16893,7 @@ const VALID_CODEOWNERS_PATHS = [
  */
 function getRequirements() {
 	let requirementsString = core.getInput('requirements');
-	let enforceOnString = core.getInput('enforce_on');
+	let enforceOnString = core.getInput('enforce-on');
 	let isCodeowners = false;
 
 	if (!enforceOnString) {
@@ -16905,7 +16905,7 @@ function getRequirements() {
 		});
 
 		if (!Array.isArray(enforceOnPaths)) {
-			throw new Error('enforce_on should be an array');
+			throw new Error('enforce-on should be an array');
 		}
 		if (core.isDebug) {
 			core.debug("using enforce-on list: " + JSON.stringify(enforceOnPaths))
