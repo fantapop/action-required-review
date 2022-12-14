@@ -32,6 +32,7 @@ async function fetchReviewers() {
 			} );
 		}
 	} catch ( error ) {
+		core.error("error caused reviewer check to fail: " + error)
 		throw new WError(
 			`Failed to query ${ owner }/${ repo } PR #${ pr } reviewers from GitHub`,
 			error,
