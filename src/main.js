@@ -22,14 +22,14 @@ function getRequirements() {
 	let enforceOn = false;
 
 	if (!enforceOnString) {
-		enforceOn = [];
+		enforceOnPaths = [];
 	} else {
 
-		enforceOn = yaml.load(enforceOnString, {
+		enforceOnPaths = yaml.load(enforceOnString, {
 			onWarning: w => core.warning(`Yaml: ${w.message}`),
 		});
 
-		if (!Array.isArray(enforceOn)) {
+		if (!Array.isArray(enforceOnPaths)) {
 			throw new Error('enforce_on should be an array');
 		}
 
@@ -71,7 +71,7 @@ function getRequirements() {
 	try {
 		if (isCodeowners) {
 			core.info("Parsing Codeowners")
-			requirements = parseCodeOwners(requirementsString, enforceOn);
+			requirements = parseCodeOwners(requirementsString, enforceOnPaths);
 		}
 		else {
 			core.info("Parsing Yaml")

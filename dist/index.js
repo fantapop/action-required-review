@@ -16229,7 +16229,7 @@ function wrappy (fn, cb) {
 
 const core = __nccwpck_require__(2186);
 
-function buildRequirement(line, enforceOn) {
+function buildRequirement(line, enforceOnPaths) {
 
     if (!line) {
         return;
@@ -16242,8 +16242,10 @@ function buildRequirement(line, enforceOn) {
     }
 
     const [path, ...teams] = trimmedLine.split(/\s+/)
-    core.debug(`parsed line from codeowners: path: ${path}, teams: ${teams}`)
-    if (enforceOn === path) {
+    if (core.isDebug) {
+        core.debug(`parsed line from codeowners: path: ${path}, teams: ${teams}`)
+    }
+    if (enforceOnPaths.includes(path)) {
         return {
             "paths": [path],
             teams,
@@ -16253,10 +16255,12 @@ function buildRequirement(line, enforceOn) {
     return
 }
 
-function parseCodeOwners(data, enforceOn) {
+function parseCodeOwners(data, enforceOnPaths) {
     const lines = data.split('\n');
-    core.debug(`about to parse code owners: ${lines.join('\n')}`)
-    return lines.map(line => buildRequirement(line, enforceOn)).filter(value => !!value);
+    if (core.isDebug) {
+        core.debug(`about to parse code owners: ${lines.join('\n')}`)
+    }
+    return lines.map(line => buildRequirement(line, enforceOnPaths)).filter(value => !!value);
 }
 
 module.exports = parseCodeOwners;
@@ -16894,14 +16898,14 @@ function getRequirements() {
 	let enforceOn = false;
 
 	if (!enforceOnString) {
-		enforceOn = [];
+		enforceOnPaths = [];
 	} else {
 
-		enforceOn = yaml.load(enforceOnString, {
+		enforceOnPaths = yaml.load(enforceOnString, {
 			onWarning: w => core.warning(`Yaml: ${w.message}`),
 		});
 
-		if (!Array.isArray(enforceOn)) {
+		if (!Array.isArray(enforceOnPaths)) {
 			throw new Error('enforce_on should be an array');
 		}
 
@@ -16943,7 +16947,7 @@ function getRequirements() {
 	try {
 		if (isCodeowners) {
 			core.info("Parsing Codeowners")
-			requirements = parseCodeOwners(requirementsString, enforceOn);
+			requirements = parseCodeOwners(requirementsString, enforceOnPaths);
 		}
 		else {
 			core.info("Parsing Yaml")
