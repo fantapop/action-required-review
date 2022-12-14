@@ -16227,27 +16227,21 @@ function wrappy (fn, cb) {
 /***/ 8826:
 /***/ ((module) => {
 
-function parseLine(line, enforceOn) {
-    const lineList = line.split(/(\s+)/).filter(
-        e => { return e.trim().length > 0; }
-    );
-    const linePath = lineList[0]
-    if (enforceOn === linePath) {
-        const result = {
+function buildRequirement(line, enforceOn) {
+    const [path, ...rest] = line.trim().split(/\s+/)
+    if (enforceOn === path) {
+        return {
             "paths": [linePath],
-            "teams": lineList.slice(1)
-        }
-        return result
+            "teams": rest,
+        };
     }
 
-    return null
+    return
 }
 
 function parseCodeOwners(data, enforceOn) {
-    const dataArray = data.split('\n');
-    const result = Promise.all(dataArray.map(line => parseLine(line, enforceOn)));
-
-    return result.filter(value => !!value);
+    const lines = data.split('\n');
+    return lines.map(line => buildRequirement(line, enforceOn)).filter(value => !!value);
 }
 
 module.exports = parseCodeOwners;
