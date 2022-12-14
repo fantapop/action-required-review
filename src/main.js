@@ -106,31 +106,32 @@ async function main() {
 
 		const reviewers = await require('./reviewers.js')();
 		core.startGroup(`Found ${reviewers.length} reviewer(s)`);
-		reviewers.forEach(r => core.info(r));
+		reviewers.forEach(reviewer => core.info(reviewer));
 		core.endGroup();
 
 		const paths = await require('./paths.js')();
 		core.startGroup(`PR affects ${paths.length} file(s)`);
-		paths.forEach(p => core.info(p));
+		paths.forEach(path => core.info(path));
 		core.endGroup();
 
 		const matchedPaths = [];
 		let ok = true;
-		for (let i = 0; i < requirements.length; i++) {
-			const r = requirements[i];
-			core.startGroup(`Checking requirement "${r.name}"...`);
-			if (!r.appliesToPaths(paths, matchedPaths)) {
+
+		for (const req of requirements) {
+			core.startGroup(`Checking requirement "${req.name}"...`);
+			if (!req.appliesToPaths(paths, matchedPaths)) {
 				core.endGroup();
-				core.info(`Requirement "${r.name}" does not apply to any files in this PR.`);
-			} else if (await r.isSatisfied(reviewers)) {
+				core.info(`Requirement "${req.name}" does not apply to any files in this PR.`);
+			} else if (await req.isSatisfied(reviewers)) {
 				core.endGroup();
-				core.info(`Requirement "${r.name}" is satisfied by the existing reviews.`);
+				core.info(`Requirement "${req.name}" is satisfied by the existing reviews.`);
 			} else {
 				ok = false;
 				core.endGroup();
-				core.error(`Requirement "${r.name}" is not satisfied by the existing reviews.`);
+				core.error(`Requirement "${req.name}" is not satisfied by the existing reviews.`);
 			}
 		}
+
 		if (ok) {
 			await reporter.status(reporter.STATE_SUCCESS, 'All required reviews have been provided!');
 		} else {

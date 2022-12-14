@@ -138,6 +138,7 @@ class Requirement {
 						filter: picomatch( path.substring( 1 ), { dot: true, nonegate: true } ),
 					};
 				}
+				core.info('Creating picomatch filter for path: ' + path)
 				return {
 					negated: false,
 					filter: picomatch( path, { dot: true } ),
@@ -157,7 +158,7 @@ class Requirement {
 			throw new RequirementError(
 				'Paths must be a non-empty array of strings, or the string "unmatched".',
 				{
-					config: config,
+					config,
 				}
 			);
 		}
