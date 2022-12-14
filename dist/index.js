@@ -16230,7 +16230,18 @@ function wrappy (fn, cb) {
 const core = __nccwpck_require__(2186);
 
 function buildRequirement(line, enforceOn) {
-    const [path, ...teams] = line.trim().split(/\s+/)
+
+    if (!line) {
+        return;
+    }
+
+    const trimmedLine = line.trim()
+
+    if (trimmedLine.startsWith('#')) {
+        return;
+    }
+
+    const [path, ...teams] = trimmedLine.split(/\s+/)
     core.debug(`parsed line from codeowners: path: ${path}, teams: ${teams}`)
     if (enforceOn === path) {
         return {

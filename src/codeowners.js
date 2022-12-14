@@ -1,7 +1,18 @@
 const core = require('@actions/core');
 
 function buildRequirement(line, enforceOn) {
-    const [path, ...teams] = line.trim().split(/\s+/)
+
+    if (!line) {
+        return;
+    }
+
+    const trimmedLine = line.trim()
+
+    if (trimmedLine.startsWith('#')) {
+        return;
+    }
+
+    const [path, ...teams] = trimmedLine.split(/\s+/)
     core.debug(`parsed line from codeowners: path: ${path}, teams: ${teams}`)
     if (enforceOn === path) {
         return {
