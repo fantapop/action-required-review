@@ -2,9 +2,9 @@ import fs from 'fs';
 import yaml from 'js-yaml';
 
 import * as core from '@actions/core';
-import * as reporter from './reporter';
 import Requirement, { isRequirements, RequirementConfig} from './requirement';
 import {parseCodeowners } from './codeowners';
+import { ReportError } from './github';
 
 // https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-location
 const VALID_CODEOWNERS_PATHS = [
@@ -45,7 +45,7 @@ export function getRequirements(): Requirement[] {
 	if (!requirementsString) {
 		const filename = core.getInput('requirements-file');
 		if (!filename) {
-			throw new reporter.ReportError(
+			throw new ReportError(
 				'Requirements are not found',
 				new Error('Either `requirements` or `requirements-file` input is required'),
 			);
@@ -62,7 +62,7 @@ export function getRequirements(): Requirement[] {
 			core.info('ls .: ' + fs.readdirSync('.'))
 			requirementsString = fs.readFileSync(trimmedFilename, 'utf8');
 		} catch (error) {
-			throw new reporter.ReportError(
+			throw new ReportError(
 				`Requirements file ${trimmedFilename} could not be read`,
 				error,
 			);
@@ -74,7 +74,7 @@ export function getRequirements(): Requirement[] {
 	try {
 		return buildRequirements(requirementsString, isCodeowners, enforceOnPaths);
 	} catch (error) {
-		throw new reporter.ReportError('Requirements are not valid', error);
+		throw new ReportError('Requirements are not valid', error);
 	}
 }
 

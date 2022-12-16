@@ -1,10 +1,6 @@
 import * as core from '@actions/core';
 import { getRequirements, satisfiesAllRequirements } from './main-helper';
-import { fetchReviewers } from './reviewers';
-import { fetchPaths } from './paths';
-import * as reporter from './reporter';
-
-const { State } = reporter;
+import { fetchReviewers, fetchPaths, State, status as reportStatus, ReportError } from './github';
 
 /**
  * Action entry point.
@@ -25,16 +21,16 @@ async function main() {
 		core.endGroup();
 
 		if (await satisfiesAllRequirements(requirements, paths, reviewers)) {
-			await reporter.status(State.SUCCESS, 'All required reviews have been provided!');
+			await reportStatus(State.SUCCESS, 'All required reviews have been provided!');
 		} else {
-			await reporter.status(
+			await reportStatus(
 				core.getBooleanInput('fail') ? State.FAILURE : State.PENDING,
 				reviewers.length ? 'Awaiting more reviews...' : 'Awaiting reviews...'
 			);
 		}
 	} catch (error) {
 		let err, state, description;
-		if (error instanceof reporter.ReportError) {
+		if (error instanceof ReportError) {
 			err = error.cause();
 			state = State.FAILURE;
 			description = error.message;
@@ -49,7 +45,7 @@ async function main() {
 			core.info(stack);
 		}
 		if (core.getInput('token') && core.getInput('status')) {
-			await reporter.status(state, description);
+			await reportStatus(state, description);
 		}
 	}
 }
