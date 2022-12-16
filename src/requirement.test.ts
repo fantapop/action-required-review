@@ -1,26 +1,23 @@
 import { buildRequirements } from "./main-helper";
 
-let mockTeams;
+let mockTeams: {[key:string]: string[]} | undefined;
 
-jest.mock('./team-members', () => {
-    const originalModule = jest.requireActual('./team-members');
-    const fetchTeamMembers = jest.fn(async (team: string) => {
-
-        if ( team.startsWith( '@' ) ) {
-            return originalModule(team);
-        }
-        else {
-            if (!mockTeams) {
-                throw new Error('mockTeams cannot be empty for this test')
+jest.mock('./team-members', () => ({
+        __esModule: true,
+        fetchTeamMembers: jest.fn((team: string): string[] | undefined => {
+            if ( team.startsWith( '@' ) ) {
+                return [ team.slice(1) ];
             }
             else {
-                return mockTeams[team];
+                if (!mockTeams) {
+                    throw new Error('mockTeams cannot be empty for this test')
+                }
+                else {
+                    return mockTeams[team];
+                }
             }
-        }
-    });
-
-    return fetchTeamMembers;
-});
+        }),
+}));
 
 const buildCodeownersRequirement = (path: string, teams: string[]) => {
     const [requirement] = buildRequirements(`${path} ${teams.join(' ')}`, true /* isCodeowners */, [path]);
@@ -30,21 +27,21 @@ const buildCodeownersRequirement = (path: string, teams: string[]) => {
 describe('CODEOWNERS based Requirements', () => {
     it ('star matches all files', () => {
         const requirement = buildCodeownersRequirement('*', ['team']);
-        const matchedPaths = [];
+        const matchedPaths: string[] = [];
         expect(requirement.appliesToPaths(['anyfile', 'subdir/file.txt'], matchedPaths)).toBe(true);
         expect(matchedPaths).toEqual(['anyfile', 'subdir/file.txt']);
     });
 
     it ('*.extension matches extension anywhere in the tree', () => {
         const requirement = buildCodeownersRequirement('*.js', ['team']);
-        const matchedPaths = [];
+        const matchedPaths: string[] = [];
         expect(requirement.appliesToPaths(['hi', 'hi.txt', 'hi.js', 'subdir/hi.js'], matchedPaths));
         expect(matchedPaths.sort()).toEqual(['hi.js', 'subdir/hi.js'].sort());
     });
 
     it ('directories match all subfiles', () => {
         const requirement = buildCodeownersRequirement('/build/logs/', ['team']);
-        const matchedPaths = [];
+        const matchedPaths: string[] = [];
         expect(requirement.appliesToPaths([
             'build',
             'build/logs/',
@@ -61,7 +58,7 @@ describe('CODEOWNERS based Requirements', () => {
 
     it ('dir with /* matches one level after dir', () => {
         const requirement = buildCodeownersRequirement('docs/*', ['team']);
-        const matchedPaths = [];
+        const matchedPaths: string[] = [];
         expect(requirement.appliesToPaths([
             '/docs',
             '/docs/',
@@ -83,7 +80,7 @@ describe('CODEOWNERS based Requirements', () => {
 
     it ('dir without / prefix matches at any level', () => {
         const requirement = buildCodeownersRequirement('apps/', ['team']);
-        const matchedPaths = [];
+        const matchedPaths: string[] = [];
         expect(requirement.appliesToPaths([
             '/docs',
             '/apps',

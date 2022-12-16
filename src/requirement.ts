@@ -1,10 +1,29 @@
-const assert = require( 'assert' );
-const core = require( '@actions/core' );
-const { SError } = require( 'error' );
-const picomatch = require( 'picomatch' );
-const fetchTeamMembers = require( './team-members' );
+import * as core from '@actions/core'
+import assert from 'assert';
+import picomatch from 'picomatch';
 
-class RequirementError extends SError {}
+import { fetchTeamMembers } from './team-members';
+
+export enum RequirementOperation {
+	allOf = 'all-of',
+	anyOf = 'any-of',
+}
+
+type TeamConfig = string | {[key in RequirementOperation]?: string[]} | string[];
+
+export interface RequirementConfig {
+	name?: string;
+	teams: string[];
+	paths: 'unmatched' | [string, ...string[]];
+}
+
+
+class RequirementError extends Error {
+	constructor(message: string, extra: {config: any, value?: any}) {
+		super(message);
+		Object.setPrototypeOf(this, RequirementError.prototype);
+	}
+}
 
 /**
  * Prints a result set, then returns it.
@@ -13,7 +32,7 @@ class RequirementError extends SError {}
  * @param {string[]} items - Items to print. If an empty array, will print `<empty set>` instead.
  * @returns {string[]} `items`.
  */
-function printSet( label, items ) {
+function printSet( label: string, items: string[] ): string[] {
 	core.info( label + ' ' + ( items.length ? items.join( ', ' ) : '<empty set>' ) );
 	return items;
 }
@@ -26,7 +45,7 @@ function printSet( label, items ) {
  * @param {string} indent - String for indentation.
  * @returns {Function} Function to filter an array of reviewers by membership in the team(s).
  */
-function buildReviewerFilter( config, teamConfig, indent ) {
+function buildReviewerFilter( config: RequirementConfig , teamConfig: TeamConfig, indent: string ): ReviewerFilter {
 	if ( typeof teamConfig === 'string' ) {
 		const team = teamConfig;
 		return async function ( reviewers ) {
@@ -38,19 +57,32 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		};
 	}
 
-	let keys;
-	try {
-		keys = Object.keys( teamConfig );
-		assert( keys.length === 1 );
-	} catch {
-		throw new RequirementError( 'Expected a team name or a single-keyed object.', {
-			config: config,
-			value: teamConfig,
-		} );
+	if (Array.isArray(teamConfig) ) {
+		throw new Error('teamConfig must not be an array at this point');
 	}
 
-	const operation = keys[ 0 ];
-	let teams = teamConfig[ operation ];
+	let operation: RequirementOperation | undefined
+	try {
+		const keys = Object.keys( teamConfig );
+		assert( keys.length === 1 );
+		if (RequirementOperation.allOf === keys[0] || RequirementOperation.anyOf === keys[0]) {
+			operation = keys[0];
+		}
+		else {
+			throw new RequirementError( 'operation must be all-of or any-of', {
+				config,
+				value: teamConfig,
+			});
+		}
+	} catch {
+		throw new RequirementError( 'Expected a team name or a single-keyed object.', {
+			config,
+			value: teamConfig,
+		});
+	}
+
+	let teams: string[] | undefined = teamConfig[ operation ];
+	let reviewerFilters: ReviewerFilter[] = [];
 
 	switch ( operation ) {
 		case 'any-of':
@@ -62,13 +94,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 					value: teams,
 				} );
 			}
-			if ( ! teams.length === 0 ) {
-				throw new RequirementError( 'Expected a non-empty array of teams', {
-					config: config,
-					value: teamConfig,
-				} );
-			}
-			teams = teams.map( team => buildReviewerFilter( config, team, `${indent}  ` ) );
+			reviewerFilters = teams.map( team => buildReviewerFilter( config, team, `${indent}  ` ) );
 			break;
 
 		default:
@@ -83,7 +109,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 			core.info( `${ indent }Union of these:` );
 			return printSet( `${ indent }=>`, [
 				...new Set(
-					( await Promise.all( teams.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
+					( await Promise.all( reviewerFilters.map( filter => filter( reviewers) ) ) ).flat( 1 )
 				),
 			] );
 		};
@@ -92,7 +118,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 	if ( operation === 'all-of' ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these, if none are empty:` );
-			const filtered = await Promise.all( teams.map( f => f( reviewers, `${ indent }  ` ) ) );
+			const filtered = await Promise.all( reviewerFilters.map( filter => filter( reviewers) ) );
 			if ( filtered.some( a => a.length === 0 ) ) {
 				return printSet( `${ indent }=>`, [] );
 			}
@@ -100,17 +126,41 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		};
 	}
 
-	// WTF?
 	throw new RequirementError( `Unrecognized operation "${ operation }"`, {
 		config: config,
 		value: teamConfig,
 	} );
 }
 
+function isRequirement(req: unknown): req is RequirementConfig {
+	const maybeRequirementConfig = req as RequirementConfig;
+	return maybeRequirementConfig.teams &&
+		Array.isArray(maybeRequirementConfig.teams) &&
+		maybeRequirementConfig.paths && 
+		Array.isArray(maybeRequirementConfig.paths);
+}
+
+export function isRequirements(reqs: unknown): reqs is RequirementConfig[] {
+	return Array.isArray(reqs) && reqs.every(isRequirement);
+}
+
+type ReviewerFilter = (reviewers: string[]) => Promise<string[]>;
+
+interface NegatableFilter {
+	negated: boolean;
+	filter: ReturnType<typeof picomatch>;
+}
+
 /**
  * Class representing an individual requirement.
  */
-class Requirement {
+export default class Requirement {
+
+	name: string;
+	teams: string[];
+	pathsFilter: null | ((path: string) => boolean);
+	reviewerFilter?: ReviewerFilter;
+
 	/**
 	 * Constructor.
 	 *
@@ -118,7 +168,7 @@ class Requirement {
 	 * @param {string[]|string} config.paths - Paths this requirement applies to. Either an array of picomatch globs, or the string "unmatched".
 	 * @param {Array} config.teams - Team reviews requirements.
 	 */
-	constructor( config ) {
+	constructor( config: RequirementConfig ) {
 		this.name = config.name || 'Unnamed requirement';
 		this.teams = config.teams;
 
@@ -145,7 +195,13 @@ class Requirement {
 					filter: picomatch( path, { dot: true } ),
 				};
 			} );
+
 			const first = filters.shift();
+
+			if (!first) {
+				throw new RequirementError("there must be at least one path", { config });
+			}
+
 			this.pathsFilter = v => {
 				let ret = first.filter( v ) ? ! first.negated : first.negated;
 				for ( const filter of filters ) {
@@ -160,7 +216,7 @@ class Requirement {
 				'Paths must be a non-empty array of strings, or the string "unmatched".',
 				{
 					config,
-				}
+				},
 			);
 		}
 
@@ -168,7 +224,8 @@ class Requirement {
 		// CODEOWNERS file functionality which allows negating matches by
 		// letting them have no associated teams or users.
 		if (this.teams.length !== 0) {
-			this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
+			const teamConfig: TeamConfig = { [RequirementOperation.anyOf]: config.teams };
+			this.reviewerFilter = buildReviewerFilter( config, teamConfig, '  ' );
 		}
 	}
 
@@ -179,10 +236,11 @@ class Requirement {
 	 * @param {string[]} matchedPaths - Paths that have already been matched. Will be modified if true is returned.
 	 * @returns {boolean} Whether the requirement applies.
 	 */
-	appliesToPaths( paths, matchedPaths ) {
+	appliesToPaths( paths: string[], matchedPaths: string[] ): boolean {
 		let matches;
-		if ( this.pathsFilter ) {
-			matches = paths.filter( path => this.pathsFilter( path ) );
+		const pathsFilter = this.pathsFilter;
+		if ( pathsFilter ) {
+			matches = paths.filter( path => pathsFilter( path ) );
 		} else {
 			// matchedPaths kept around to support the unmatched special value
 			core.info('matched paths is being consulted');
@@ -208,16 +266,17 @@ class Requirement {
 	 * @param {string[]} reviewers - Reviewers to test against.
 	 * @returns {boolean} Whether the requirement is satisfied.
 	 */
-	async isSatisfied( reviewers ) {
-
+	async isSatisfied( reviewers: string[] ): Promise<boolean> {
 		if (this.teams.length === 0) {
 			core.info( 'Requirement has no reviewers' );
 			return true;
 		}
-
-		core.info( 'Checking reviewers...' );
-		return ( await this.reviewerFilter( reviewers ) ).length > 0;
+		else if (this.reviewerFilter) {
+			core.info( 'Checking reviewers...' );
+			return ( await this.reviewerFilter( reviewers ) ).length > 0;
+		}
+		else {
+			throw new Error('reviewerFilter unexpectedly undefined');
+		}
 	}
 }
-
-module.exports = Requirement;

@@ -1,6 +1,7 @@
-const core = require('@actions/core');
+import * as core from '@actions/core'
+import { RequirementConfig } from './requirement';
 
-function convertToPicomatchCompatiblePath(path, teams) {
+function convertToPicomatchCompatiblePath(path: string): string {
 
     // github * means match anything
     if (path === '*') {
@@ -28,7 +29,7 @@ function convertToPicomatchCompatiblePath(path, teams) {
     return picoPath;
 }
 
-function buildRequirement(line, enforceOnPaths) {
+function buildRequirement(line: string, enforceOnPaths: string[]): RequirementConfig | undefined {
 
     if (!line) {
         return;
@@ -42,27 +43,27 @@ function buildRequirement(line, enforceOnPaths) {
     }
 
     const [path, ...teams] = trimmedLine.split(/\s+/)
-    if (core.isDebug) {
+    if (core.isDebug()) {
         core.debug(`parsed line from codeowners: path: ${path}, teams: ${teams}`)
     }
 
     if (enforceOnPaths.includes(path)) {
         return {
-            paths: [ convertToPicomatchCompatiblePath(path, teams) ],
+            paths: [ convertToPicomatchCompatiblePath(path) ],
             teams,
         };
     }
 
-    return
+    return;
 }
 
-function parseCodeOwners(data, enforceOnPaths) {
+export function parseCodeowners(data: string, enforceOnPaths: string[]): RequirementConfig[] {
     const lines = data.split('\n');
-    if (core.isDebug) {
+    if (core.isDebug()) {
         core.debug(`about to parse code owners: ${lines.join('\n')}`)
     }
 
-    const codeOwnersRequirements = [];
+    const codeOwnersRequirements: RequirementConfig[] = [];
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const requirement = buildRequirement(line, enforceOnPaths);
@@ -76,5 +77,3 @@ function parseCodeOwners(data, enforceOnPaths) {
 
     return codeOwnersRequirements;
 }
-
-module.exports = parseCodeOwners;

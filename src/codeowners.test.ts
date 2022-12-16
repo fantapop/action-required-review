@@ -1,6 +1,6 @@
-import parseCodeOwners from "./codeowners";
+import { parseCodeowners } from "./codeowners";
 
-describe('parseCodeOwners', () => {
+describe('parseCodeowners', () => {
     it ('handles ignores commented lines', () => {
         const codeownersString = `
 #commented no space in between
@@ -8,21 +8,21 @@ describe('parseCodeOwners', () => {
 /path team
    #comment with preceding space
         `;
-        expect(parseCodeOwners(codeownersString, ['/path'] /* enforceOnPaths */)).toEqual([{
+        expect(parseCodeowners(codeownersString, ['/path'] /* enforceOnPaths */)).toEqual([{
             paths: ['path'],
             teams: ['team']
         }])
     });
     it ('handles trailing comments correctly', () => {
         const codeownersString = '/path team # trailing comment';
-        expect(parseCodeOwners(codeownersString, ['/path'] /* enforceOnPaths */)).toEqual([{
+        expect(parseCodeowners(codeownersString, ['/path'] /* enforceOnPaths */)).toEqual([{
             paths: ['path'],
             teams: ['team']
         }])
     });
     it ('parses out all teams', () => {
         const codeownersString = '/path team1 team2 team3';
-        expect(parseCodeOwners(codeownersString, ['/path'] /* enforceOnPaths */)).toEqual([{
+        expect(parseCodeowners(codeownersString, ['/path'] /* enforceOnPaths */)).toEqual([{
             paths: ['path'],
             teams: ['team1', 'team2', 'team3']
         }])
@@ -32,7 +32,7 @@ describe('parseCodeOwners', () => {
 /path1 team1
 /path2 team2
 /path3 team3`;
-        expect(parseCodeOwners(codeownersString, ['/path1', '/path3'] /* enforceOnPaths */)).toEqual([{
+        expect(parseCodeowners(codeownersString, ['/path1', '/path3'] /* enforceOnPaths */)).toEqual([{
             paths: ['path1'],
             teams: ['team1']
         }, {

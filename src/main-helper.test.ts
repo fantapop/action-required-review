@@ -1,26 +1,23 @@
 import { buildRequirements, satisfiesAllRequirements } from "./main-helper";
 
-let mockTeams;
+let mockTeams: {[key:string]: string[]} | undefined;
 
-jest.mock('./team-members', () => {
-    const originalModule = jest.requireActual('./team-members');
-    const fetchTeamMembers = jest.fn(async (team: string) => {
-
-        if ( team.startsWith( '@' ) ) {
-            return originalModule(team);
-        }
-        else {
-            if (!mockTeams) {
-                throw new Error('mockTeams cannot be empty for this test')
+jest.mock('./team-members', () => ({
+        __esModule: true,
+        fetchTeamMembers: jest.fn((team: string): string[] | undefined => {
+            if ( team.startsWith( '@' ) ) {
+                return [ team.slice(1) ];
             }
             else {
-                return mockTeams[team];
+                if (!mockTeams) {
+                    throw new Error('mockTeams cannot be empty for this test')
+                }
+                else {
+                    return mockTeams[team];
+                }
             }
-        }
-    });
-
-    return fetchTeamMembers;
-});
+        }),
+}));
 
 describe('satisfiesAllRequirements', () => {
     mockTeams = {
