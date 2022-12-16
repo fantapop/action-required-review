@@ -16229,15 +16229,44 @@ function wrappy (fn, cb) {
 
 const core = __nccwpck_require__(2186);
 
+function convertToPicomatchCompatiblePath(path, teams) {
+
+    // github * means match anything
+    if (path === '*') {
+        return '**';
+    }
+
+    let picoPath = path;
+
+    // codeowners path patterns that are anchored to the start of the root of
+    // the repo have a preceding forward slash but the file paths that come in
+    // do not.
+    if (picoPath.startsWith('/')) {
+        picoPath = picoPath.substring(1);
+    }
+    else {
+        // floating github paths should match any subdirectory
+        picoPath = `**/${picoPath}`;
+    }
+
+    // directory github paths match all subdirs and files
+    if (picoPath.endsWith('/')) {
+        picoPath = `${picoPath}**`;
+    }
+
+    return picoPath;
+}
+
 function buildRequirement(line, enforceOnPaths) {
 
     if (!line) {
         return;
     }
 
-    const trimmedLine = line.trim()
+    // trim line and get rid of trailing comments
+    let trimmedLine = line.split(/#/)[0].trim();
 
-    if (trimmedLine.startsWith('#')) {
+    if (trimmedLine === "" || trimmedLine.startsWith('#')) {
         return;
     }
 
@@ -16245,9 +16274,10 @@ function buildRequirement(line, enforceOnPaths) {
     if (core.isDebug) {
         core.debug(`parsed line from codeowners: path: ${path}, teams: ${teams}`)
     }
+
     if (enforceOnPaths.includes(path)) {
         return {
-            "paths": [path],
+            paths: [ convertToPicomatchCompatiblePath(path, teams) ],
             teams,
         };
     }
@@ -16260,10 +16290,172 @@ function parseCodeOwners(data, enforceOnPaths) {
     if (core.isDebug) {
         core.debug(`about to parse code owners: ${lines.join('\n')}`)
     }
-    return lines.map(line => buildRequirement(line, enforceOnPaths)).filter(value => !!value);
+
+    const codeOwnersRequirements = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const requirement = buildRequirement(line, enforceOnPaths);
+
+        if (!requirement) {
+            continue;
+        }
+
+        codeOwnersRequirements.push(requirement);
+    }
+
+    return codeOwnersRequirements;
 }
 
 module.exports = parseCodeOwners;
+
+
+/***/ }),
+
+/***/ 3115:
+/***/ ((__unused_webpack_module, __webpack_exports__, __nccwpck_require__) => {
+
+"use strict";
+__nccwpck_require__.r(__webpack_exports__);
+/* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
+/* harmony export */   "getRequirements": () => (/* binding */ getRequirements),
+/* harmony export */   "buildRequirements": () => (/* binding */ buildRequirements),
+/* harmony export */   "satisfiesAllRequirements": () => (/* binding */ satisfiesAllRequirements)
+/* harmony export */ });
+const core = __nccwpck_require__(2186);
+const fs = __nccwpck_require__(5747);
+const yaml = __nccwpck_require__(1917);
+const Requirement = __nccwpck_require__(2720);
+const parseCodeowners = __nccwpck_require__(8826);
+const reporter = __nccwpck_require__(3719);
+
+// https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-location
+const VALID_CODEOWNERS_PATHS = [
+	'CODEOWNERS', '.github/CODEOWNERS', 'docs/CODEOWNERS',
+];
+
+/**
+ * Load the requirements yaml file.
+ *
+ * @returns {Requirement[]} Requirements.
+ */
+function getRequirements() {
+	let requirementsString = core.getInput('requirements');
+	let enforceOnString = core.getInput('enforce-on');
+	let isCodeowners = false;
+	let enforceOnPaths;
+
+	if (!enforceOnString) {
+		enforceOnPaths = [];
+	} else {
+
+		enforceOnPaths = yaml.load(enforceOnString, {
+			onWarning: w => core.warning(`Yaml: ${w.message}`),
+		});
+
+		if (!Array.isArray(enforceOnPaths)) {
+			throw new Error('enforce-on should be an array');
+		}
+		if (core.isDebug) {
+			core.debug("using enforce-on list: " + JSON.stringify(enforceOnPaths))
+		}
+	}
+
+
+	if (!requirementsString) {
+		const filename = core.getInput('requirements-file');
+		if (!filename) {
+			throw new reporter.ReportError(
+				'Requirements are not found',
+				new Error('Either `requirements` or `requirements-file` input is required'),
+				{}
+			);
+		}
+
+		const trimmedFilename = filename.trim();
+
+		if (VALID_CODEOWNERS_PATHS.includes(trimmedFilename)) {
+			isCodeowners = true
+		}
+
+		try {
+			core.info('working directory is: ' + process.cwd())
+			core.info('ls .: ' + fs.readdirSync('.'))
+			requirementsString = fs.readFileSync(trimmedFilename, 'utf8');
+		} catch (error) {
+			throw new reporter.ReportError(
+				`Requirements file ${trimmedFilename} could not be read`,
+				error,
+				{}
+			);
+		}
+	} else if (core.getInput('requirements-file')) {
+		core.warning('Ignoring input `requirements-file` because `requirements` was given');
+	}
+
+	try {
+		return buildRequirements(requirementsString, isCodeowners, enforceOnPaths);
+	} catch (error) {
+
+		error[Symbol.toStringTag] = 'Error'; // Work around weird check in WError.
+		throw new reporter.ReportError('Requirements are not valid', error, {});
+
+	}
+}
+
+function buildRequirements(requirementsString, isCodeowners, enforceOnPaths) {
+	let requirements;
+
+	if (isCodeowners) {
+		core.info("Parsing Codeowners")
+		requirements = parseCodeowners(requirementsString, enforceOnPaths);
+	}
+	else {
+		core.info("Parsing Yaml")
+		requirements = yaml.load(requirementsString, {
+			onWarning: w => core.warning(`Yaml: ${w.message}`),
+		});
+	}
+	core.debug("read requirements: ", requirements)
+
+	if (!Array.isArray(requirements)) {
+		throw new Error(`Requirements file does not contain an array. Input: ${requirements}`);
+	}
+
+	return requirements.map((r, i) => new Requirement({ name: `#${i}`, ...r }));
+}
+
+async function satisfiesAllRequirements(requirements, paths, reviewers) {
+	const matchedPaths = [];
+	let satisfied = true;
+
+	// currently, checking if each requirement is satisfied. This doesn't work
+	// well with the CODEOWNERS format because each requirement maps to a rule
+	// and only the final matching rule for a path should apply.
+
+	// instead of looping per requirement, I'm going to try reversing the list
+	// of requirements and then looping per path to find the first requirement
+	// that applies
+	PATH: for (const path of paths) {
+		// loop through requirements backwards since the last matching one
+		// should apply
+		for (let i = requirements.length - 1; i >= 0; i--) {
+			const requirement = requirements[i];
+			if (requirement.appliesToPaths([path], matchedPaths)) {
+				if (await requirement.isSatisfied(reviewers)) {
+					core.info(`Requirement ${requirement.name} applies to "${path}": satisfied`);
+				}
+				else {
+					core.info(`Requirement ${requirement.name} applies to "${path}": not satisfied`);
+					satisfied = false;
+				}
+				continue PATH;
+			}
+		}
+		core.info(`No requirements apply to "${path}"`);
+	}
+
+	return satisfied;
+}
 
 
 /***/ }),
@@ -16434,50 +16626,50 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		} );
 	}
 
-	const op = keys[ 0 ];
-	let arg = teamConfig[ op ];
+	const operation = keys[ 0 ];
+	let teams = teamConfig[ operation ];
 
-	switch ( op ) {
+	switch ( operation ) {
 		case 'any-of':
 		case 'all-of':
 			// These ops require an array of teams/objects.
-			if ( ! Array.isArray( arg ) ) {
-				throw new RequirementError( `Expected an array of teams, got ${ typeof arg }`, {
+			if ( ! Array.isArray( teams ) ) {
+				throw new RequirementError( `Expected an array of teams, got ${ typeof teams }`, {
 					config: config,
-					value: arg,
+					value: teams,
 				} );
 			}
-			if ( ! arg.length === 0 ) {
+			if ( ! teams.length === 0 ) {
 				throw new RequirementError( 'Expected a non-empty array of teams', {
 					config: config,
 					value: teamConfig,
 				} );
 			}
-			arg = arg.map( t => buildReviewerFilter( config, t, `${ indent }  ` ) );
+			teams = teams.map( team => buildReviewerFilter( config, team, `${indent}  ` ) );
 			break;
 
 		default:
-			throw new RequirementError( `Unrecognized operation "${ op }"`, {
+			throw new RequirementError( `Unrecognized operation "${ operation }"`, {
 				config: config,
 				value: teamConfig,
 			} );
 	}
 
-	if ( op === 'any-of' ) {
+	if ( operation === 'any-of' ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these:` );
 			return printSet( `${ indent }=>`, [
 				...new Set(
-					( await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
+					( await Promise.all( teams.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
 				),
 			] );
 		};
 	}
 
-	if ( op === 'all-of' ) {
+	if ( operation === 'all-of' ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these, if none are empty:` );
-			const filtered = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
+			const filtered = await Promise.all( teams.map( f => f( reviewers, `${ indent }  ` ) ) );
 			if ( filtered.some( a => a.length === 0 ) ) {
 				return printSet( `${ indent }=>`, [] );
 			}
@@ -16486,7 +16678,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 	}
 
 	// WTF?
-	throw new RequirementError( `Unrecognized operation "${ op }"`, {
+	throw new RequirementError( `Unrecognized operation "${ operation }"`, {
 		config: config,
 		value: teamConfig,
 	} );
@@ -16505,6 +16697,7 @@ class Requirement {
 	 */
 	constructor( config ) {
 		this.name = config.name || 'Unnamed requirement';
+		this.teams = config.teams;
 
 		if ( config.paths === 'unmatched' ) {
 			this.pathsFilter = null;
@@ -16548,7 +16741,12 @@ class Requirement {
 			);
 		}
 
-		this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
+		// allow requirements with 0 teams to better support the github
+		// CODEOWNERS file functionality which allows negating matches by
+		// letting them have no associated teams or users.
+		if (this.teams.length !== 0) {
+			this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
+		}
 	}
 
 	/**
@@ -16561,9 +16759,11 @@ class Requirement {
 	appliesToPaths( paths, matchedPaths ) {
 		let matches;
 		if ( this.pathsFilter ) {
-			matches = paths.filter( p => this.pathsFilter( p ) );
+			matches = paths.filter( path => this.pathsFilter( path ) );
 		} else {
-			matches = paths.filter( p => ! matchedPaths.includes( p ) );
+			// matchedPaths kept around to support the unmatched special value
+			core.info('matched paths is being consulted');
+			matches = paths.filter( path => ! matchedPaths.includes( path ) );
 			if ( matches.length === 0 ) {
 				core.info( "Matches files that haven't been matched yet, but all files have." );
 			}
@@ -16571,8 +16771,8 @@ class Requirement {
 
 		if ( matches.length !== 0 ) {
 			core.info( 'Matches the following files:' );
-			matches.forEach( m => core.info( `   - ${ m }` ) );
-			matchedPaths.push( ...matches.filter( p => ! matchedPaths.includes( p ) ) );
+			matches.forEach( match => core.info( `   - ${ match }` ) );
+			matchedPaths.push( ...matches.filter( path => ! matchedPaths.includes( path ) ) );
 			matchedPaths.sort();
 		}
 
@@ -16586,6 +16786,12 @@ class Requirement {
 	 * @returns {boolean} Whether the requirement is satisfied.
 	 */
 	async isSatisfied( reviewers ) {
+
+		if (this.teams.length === 0) {
+			core.info( 'Requirement has no reviewers' );
+			return true;
+		}
+
 		core.info( 'Checking reviewers...' );
 		return ( await this.reviewerFilter( reviewers ) ).length > 0;
 	}
@@ -16869,109 +17075,43 @@ module.exports = require("zlib");;
 /******/ 	}
 /******/ 	
 /************************************************************************/
+/******/ 	/* webpack/runtime/define property getters */
+/******/ 	(() => {
+/******/ 		// define getter functions for harmony exports
+/******/ 		__nccwpck_require__.d = (exports, definition) => {
+/******/ 			for(var key in definition) {
+/******/ 				if(__nccwpck_require__.o(definition, key) && !__nccwpck_require__.o(exports, key)) {
+/******/ 					Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+/******/ 				}
+/******/ 			}
+/******/ 		};
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/hasOwnProperty shorthand */
+/******/ 	(() => {
+/******/ 		__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/make namespace object */
+/******/ 	(() => {
+/******/ 		// define __esModule on exports
+/******/ 		__nccwpck_require__.r = (exports) => {
+/******/ 			if(typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+/******/ 				Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+/******/ 			}
+/******/ 			Object.defineProperty(exports, '__esModule', { value: true });
+/******/ 		};
+/******/ 	})();
+/******/ 	
 /******/ 	/* webpack/runtime/compat */
 /******/ 	
 /******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";/************************************************************************/
 var __webpack_exports__ = {};
 // This entry need to be wrapped in an IIFE because it need to be isolated against other modules in the chunk.
 (() => {
-const fs = __nccwpck_require__(5747);
 const core = __nccwpck_require__(2186);
-const yaml = __nccwpck_require__(1917);
+const { getRequirements, satisfiesAllRequirements } = __nccwpck_require__(3115); 
 const reporter = __nccwpck_require__(3719);
-const Requirement = __nccwpck_require__(2720);
-const parseCodeOwners = __nccwpck_require__(8826);
-
-// https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-location
-const VALID_CODEOWNERS_PATHS = [
-	'CODEOWNERS', '.github/CODEOWNERS', 'docs/CODEOWNERS',
-];
-
-/**
- * Load the requirements yaml file.
- *
- * @returns {Requirement[]} Requirements.
- */
-function getRequirements() {
-	let requirementsString = core.getInput('requirements');
-	let enforceOnString = core.getInput('enforce-on');
-	let isCodeowners = false;
-
-	if (!enforceOnString) {
-		enforceOnPaths = [];
-	} else {
-
-		enforceOnPaths = yaml.load(enforceOnString, {
-			onWarning: w => core.warning(`Yaml: ${w.message}`),
-		});
-
-		if (!Array.isArray(enforceOnPaths)) {
-			throw new Error('enforce-on should be an array');
-		}
-		if (core.isDebug) {
-			core.debug("using enforce-on list: " + JSON.stringify(enforceOnPaths))
-		}
-	}
-
-
-	if (!requirementsString) {
-		const filename = core.getInput('requirements-file');
-		if (!filename) {
-			throw new reporter.ReportError(
-				'Requirements are not found',
-				new Error('Either `requirements` or `requirements-file` input is required'),
-				{}
-			);
-		}
-
-		const trimmedFilename = filename.trim();
-
-		if (VALID_CODEOWNERS_PATHS.includes(trimmedFilename)) {
-			isCodeowners = true
-		}
-
-		try {
-			core.info('working directory is: ' + process.cwd())
-			core.info('ls .: ' + fs.readdirSync('.'))
-			requirementsString = fs.readFileSync(trimmedFilename, 'utf8');
-		} catch (error) {
-			throw new reporter.ReportError(
-				`Requirements file ${trimmedFilename} could not be read`,
-				error,
-				{}
-			);
-		}
-	} else if (core.getInput('requirements-file')) {
-		core.warning('Ignoring input `requirements-file` because `requirements` was given');
-	}
-
-	var requirements = []
-	try {
-		if (isCodeowners) {
-			core.info("Parsing Codeowners")
-			requirements = parseCodeOwners(requirementsString, enforceOnPaths);
-		}
-		else {
-			core.info("Parsing Yaml")
-			requirements = yaml.load(requirementsString, {
-				onWarning: w => core.warning(`Yaml: ${w.message}`),
-			});
-		}
-		core.debug("read requirements: ", requirements)
-
-		if (!Array.isArray(requirements)) {
-			throw new Error(`Requirements file does not contain an array. Input: ${requirements}`);
-		}
-
-		return requirements.map((r, i) => new Requirement({ name: `#${i}`, ...r }));
-
-	} catch (error) {
-
-		error[Symbol.toStringTag] = 'Error'; // Work around weird check in WError.
-		throw new reporter.ReportError('Requirements are not valid', error, {});
-
-	}
-}
 
 /**
  * Action entry point.
@@ -16991,25 +17131,7 @@ async function main() {
 		paths.forEach(path => core.info(path));
 		core.endGroup();
 
-		const matchedPaths = [];
-		let ok = true;
-
-		for (const req of requirements) {
-			core.startGroup(`Checking requirement "${req.name}"...`);
-			if (!req.appliesToPaths(paths, matchedPaths)) {
-				core.endGroup();
-				core.info(`Requirement "${req.name}" does not apply to any files in this PR.`);
-			} else if (await req.isSatisfied(reviewers)) {
-				core.endGroup();
-				core.info(`Requirement "${req.name}" is satisfied by the existing reviews.`);
-			} else {
-				ok = false;
-				core.endGroup();
-				core.error(`Requirement "${req.name}" is not satisfied by the existing reviews.`);
-			}
-		}
-
-		if (ok) {
+		if (await satisfiesAllRequirements(requirements, paths, reviewers)) {
 			await reporter.status(reporter.STATE_SUCCESS, 'All required reviews have been provided!');
 		} else {
 			await reporter.status(

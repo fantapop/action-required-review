@@ -2,7 +2,7 @@ const assert = require( 'assert' );
 const core = require( '@actions/core' );
 const { SError } = require( 'error' );
 const picomatch = require( 'picomatch' );
-const fetchTeamMembers = require( './team-members.js' );
+const fetchTeamMembers = require( './team-members' );
 
 class RequirementError extends SError {}
 
@@ -49,50 +49,50 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 		} );
 	}
 
-	const op = keys[ 0 ];
-	let arg = teamConfig[ op ];
+	const operation = keys[ 0 ];
+	let teams = teamConfig[ operation ];
 
-	switch ( op ) {
+	switch ( operation ) {
 		case 'any-of':
 		case 'all-of':
 			// These ops require an array of teams/objects.
-			if ( ! Array.isArray( arg ) ) {
-				throw new RequirementError( `Expected an array of teams, got ${ typeof arg }`, {
+			if ( ! Array.isArray( teams ) ) {
+				throw new RequirementError( `Expected an array of teams, got ${ typeof teams }`, {
 					config: config,
-					value: arg,
+					value: teams,
 				} );
 			}
-			if ( ! arg.length === 0 ) {
+			if ( ! teams.length === 0 ) {
 				throw new RequirementError( 'Expected a non-empty array of teams', {
 					config: config,
 					value: teamConfig,
 				} );
 			}
-			arg = arg.map( t => buildReviewerFilter( config, t, `${ indent }  ` ) );
+			teams = teams.map( team => buildReviewerFilter( config, team, `${indent}  ` ) );
 			break;
 
 		default:
-			throw new RequirementError( `Unrecognized operation "${ op }"`, {
+			throw new RequirementError( `Unrecognized operation "${ operation }"`, {
 				config: config,
 				value: teamConfig,
 			} );
 	}
 
-	if ( op === 'any-of' ) {
+	if ( operation === 'any-of' ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these:` );
 			return printSet( `${ indent }=>`, [
 				...new Set(
-					( await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
+					( await Promise.all( teams.map( f => f( reviewers, `${ indent }  ` ) ) ) ).flat( 1 )
 				),
 			] );
 		};
 	}
 
-	if ( op === 'all-of' ) {
+	if ( operation === 'all-of' ) {
 		return async function ( reviewers ) {
 			core.info( `${ indent }Union of these, if none are empty:` );
-			const filtered = await Promise.all( arg.map( f => f( reviewers, `${ indent }  ` ) ) );
+			const filtered = await Promise.all( teams.map( f => f( reviewers, `${ indent }  ` ) ) );
 			if ( filtered.some( a => a.length === 0 ) ) {
 				return printSet( `${ indent }=>`, [] );
 			}
@@ -101,7 +101,7 @@ function buildReviewerFilter( config, teamConfig, indent ) {
 	}
 
 	// WTF?
-	throw new RequirementError( `Unrecognized operation "${ op }"`, {
+	throw new RequirementError( `Unrecognized operation "${ operation }"`, {
 		config: config,
 		value: teamConfig,
 	} );
@@ -120,6 +120,7 @@ class Requirement {
 	 */
 	constructor( config ) {
 		this.name = config.name || 'Unnamed requirement';
+		this.teams = config.teams;
 
 		if ( config.paths === 'unmatched' ) {
 			this.pathsFilter = null;
@@ -163,7 +164,12 @@ class Requirement {
 			);
 		}
 
-		this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
+		// allow requirements with 0 teams to better support the github
+		// CODEOWNERS file functionality which allows negating matches by
+		// letting them have no associated teams or users.
+		if (this.teams.length !== 0) {
+			this.reviewerFilter = buildReviewerFilter( config, { 'any-of': config.teams }, '  ' );
+		}
 	}
 
 	/**
@@ -176,9 +182,11 @@ class Requirement {
 	appliesToPaths( paths, matchedPaths ) {
 		let matches;
 		if ( this.pathsFilter ) {
-			matches = paths.filter( p => this.pathsFilter( p ) );
+			matches = paths.filter( path => this.pathsFilter( path ) );
 		} else {
-			matches = paths.filter( p => ! matchedPaths.includes( p ) );
+			// matchedPaths kept around to support the unmatched special value
+			core.info('matched paths is being consulted');
+			matches = paths.filter( path => ! matchedPaths.includes( path ) );
 			if ( matches.length === 0 ) {
 				core.info( "Matches files that haven't been matched yet, but all files have." );
 			}
@@ -186,8 +194,8 @@ class Requirement {
 
 		if ( matches.length !== 0 ) {
 			core.info( 'Matches the following files:' );
-			matches.forEach( m => core.info( `   - ${ m }` ) );
-			matchedPaths.push( ...matches.filter( p => ! matchedPaths.includes( p ) ) );
+			matches.forEach( match => core.info( `   - ${ match }` ) );
+			matchedPaths.push( ...matches.filter( path => ! matchedPaths.includes( path ) ) );
 			matchedPaths.sort();
 		}
 
@@ -201,6 +209,12 @@ class Requirement {
 	 * @returns {boolean} Whether the requirement is satisfied.
 	 */
 	async isSatisfied( reviewers ) {
+
+		if (this.teams.length === 0) {
+			core.info( 'Requirement has no reviewers' );
+			return true;
+		}
+
 		core.info( 'Checking reviewers...' );
 		return ( await this.reviewerFilter( reviewers ) ).length > 0;
 	}

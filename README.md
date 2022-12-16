@@ -137,3 +137,11 @@ the "Docs" and "Front end" review requirements. If you wanted to avoid that, you
   teams:
     - maintenance
 ```
+
+## Using CODEOWNERS
+
+This action has the ability to enforce paths seen in the CODEOWNERS file.  This provides the ability to both use CODEOWNERS as a list of who gets added to a review but also to optionally enforce reviews on some of those paths.  The current functionality offered by Github is only to force reviews for all paths in CODEOWNERS or none of them.
+
+In order to use CODEOWNERS, the enforced paths must be listed exactly in the enforce-on configuration option mentioned above.  Any paths which are not listed in that array will not be enforced by this action.  They will serve only the normal CODEOWNERS functionality which is to automatically at that team or user to the review.
+
+All enforced paths in the CODEOWNERS that show up in a PR will require a reviewer from those teams.  A single person who spans multiple teams can satisfy multiple separate requirements.
