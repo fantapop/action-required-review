@@ -6,6 +6,12 @@ import Requirement, { isRequirements, RequirementConfig} from './requirement';
 import {parseCodeowners } from './codeowners';
 import { ReportError } from './github';
 
+const VALID_CODEOWNERS_PATHS = [
+	'CODEOWNERS',
+	'.github/CODEOWNERS',
+	'docs/CODEOWNERS',
+];
+
 /**
  * Load the requirements yaml file.
  *
@@ -36,23 +42,20 @@ export function getRequirements(): Requirement[] {
 		}
 	}
 
-	const filename = core.getInput('codeowners-path');
-	if (!filename) {
-		throw new ReportError(
-			'Codeowners Path not found',
-			new Error('`codeowners-path` input is required'),
-		);
+	let codeownersString;
+	const errors: unknown[] = [];
+	for (const path of VALID_CODEOWNERS_PATHS) {
+		try {
+			codeownersString = fs.readFileSync(path, 'utf8');
+		} catch (error) {
+			errors.push(error)
+		}
 	}
-
-	const trimmedFilename = filename.trim();
-
-	let codeownersString
-	try {
-		codeownersString = fs.readFileSync(trimmedFilename, 'utf8');
-	} catch (error) {
+	if (!codeownersString) {
+		const lastError = errors.pop()
 		throw new ReportError(
-			`Requirements file ${trimmedFilename} could not be read`,
-			error,
+			`Unable to find CODEOWNERS file. This file is require to continue`,
+			lastError,
 		);
 	}
 

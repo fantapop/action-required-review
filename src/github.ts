@@ -7,12 +7,13 @@ export enum State {
 	PENDING = 'pending',
 	SUCCESS = 'success',
 };
+type Octokit = ReturnType<typeof github.getOctokit >
 
 const teamMemberCache: {[key:string]: string[]} = {};
 
 const SUPPORTED_MESSAGE = 'action only supported for pull_request_review and pull_request triggers';
 
-function getOctokit () {
+function getOctokit (): {octokit: Octokit, owner: string, repo: string, pr: number, sha: string} {
 	const octokit = github.getOctokit( core.getInput( 'token', { required: true } ) );
 	const { payload } = github.context;
 
