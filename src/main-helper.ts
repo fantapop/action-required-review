@@ -76,6 +76,7 @@ export function buildRequirements(codeownersString: string, enforceOnPaths: stri
 	core.info("Parsing Codeowners")
 	requirements = parseCodeowners(codeownersString, enforceOnPaths);
 	if (core.isDebug()) {
+		core.debug("codeowners contents: " + codeownersString)
 		core.debug("built requirements: " + requirements)
 	}
 

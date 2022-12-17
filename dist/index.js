@@ -16327,6 +16327,7 @@ function buildRequirements(codeownersString, enforceOnPaths) {
     core.info("Parsing Codeowners");
     requirements = parseCodeowners(codeownersString, enforceOnPaths);
     if (core.isDebug()) {
+        core.debug("codeowners contents: " + codeownersString);
         core.debug("built requirements: " + requirements);
     }
     if (!Array.isArray(requirements)) {
