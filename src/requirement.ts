@@ -2,7 +2,7 @@ import * as core from '@actions/core'
 import assert from 'assert';
 import picomatch from 'picomatch';
 
-import { fetchTeamMembers } from './team-members';
+import { fetchTeamMembers } from './github';
 
 export enum RequirementOperation {
 	allOf = 'all-of',
@@ -14,7 +14,7 @@ type TeamConfig = string | {[key in RequirementOperation]?: string[]} | string[]
 export interface RequirementConfig {
 	name?: string;
 	teams: string[];
-	paths: 'unmatched' | [string, ...string[]];
+	path: string;
 }
 
 
@@ -136,8 +136,7 @@ function isRequirement(req: unknown): req is RequirementConfig {
 	const maybeRequirementConfig = req as RequirementConfig;
 	return maybeRequirementConfig.teams &&
 		Array.isArray(maybeRequirementConfig.teams) &&
-		maybeRequirementConfig.paths && 
-		Array.isArray(maybeRequirementConfig.paths);
+		typeof (maybeRequirementConfig.path) === 'string';
 }
 
 export function isRequirements(reqs: unknown): reqs is RequirementConfig[] {
@@ -172,17 +171,17 @@ export default class Requirement {
 		this.name = config.name || 'Unnamed requirement';
 		this.teams = config.teams;
 
-		if ( config.paths === 'unmatched' ) {
-			this.pathsFilter = null;
-		} else if (
-			Array.isArray( config.paths ) &&
-			config.paths.length > 0 &&
-			config.paths.every( v => typeof v === 'string' )
+		// TODO(fitzner): remove path array code below
+		const paths = [config.path]
+		if (
+			Array.isArray( paths ) &&
+			paths.length > 0 &&
+			paths.every( v => typeof v === 'string' )
 		) {
 			// picomatch doesn't combine multiple negated patterns in a way that makes sense here: `!a` and `!b` will pass both `a` and `b`
 			// because `a` matches `!b` and `b` matches `!a`. So instead we have to handle the negation ourself: test the (non-negated) patterns in order,
 			// with the last match winning. If none match, the opposite of the first pattern's negation is what we need.
-			const filters = config.paths.map( path => {
+			const filters = paths.map( path => {
 				if ( path.startsWith( '!' ) ) {
 					return {
 						negated: true,
@@ -232,19 +231,21 @@ export default class Requirement {
 	/**
 	 * Test whether this requirement applies to the passed paths.
 	 *
-	 * @param {string[]} paths - Paths to test against.
+	 * @param {string} path - Path to test against.
 	 * @param {string[]} matchedPaths - Paths that have already been matched. Will be modified if true is returned.
 	 * @returns {boolean} Whether the requirement applies.
 	 */
-	appliesToPaths( paths: string[], matchedPaths: string[] ): boolean {
+	appliesToPath( path: string, matchedPaths: string[] ): boolean {
 		let matches;
 		const pathsFilter = this.pathsFilter;
+
+		// TODO(fitzner): update this code to only ever deal with a single path
 		if ( pathsFilter ) {
-			matches = paths.filter( path => pathsFilter( path ) );
+			matches = [path].filter( path => pathsFilter( path ) );
 		} else {
 			// matchedPaths kept around to support the unmatched special value
 			core.info('matched paths is being consulted');
-			matches = paths.filter( path => ! matchedPaths.includes( path ) );
+			matches = [path].filter( path => ! matchedPaths.includes( path ) );
 			if ( matches.length === 0 ) {
 				core.info( "Matches files that haven't been matched yet, but all files have." );
 			}

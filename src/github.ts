@@ -8,6 +8,8 @@ export enum State {
 	SUCCESS = 'success',
 };
 
+const teamMemberCache: {[key:string]: string[]} = {};
+
 const SUPPORTED_MESSAGE = 'action only supported for pull_request_review and pull_request triggers';
 
 function getOctokit () {
@@ -154,4 +156,42 @@ export class ReportError extends Error {
 	public cause() {
 		return this._cause;
 	}
+}
+
+/**
+ * Fetch the members of a team for the purpose of verifying a review Requirement.
+ * Special case: Names prefixed with @ are considered to be a one-member team with the named GitHub user.
+ *
+ * @param {string} team - GitHub team slug, or @ followed by a GitHub user name.
+ * @returns {string[]} Team members.
+ */
+export async function fetchTeamMembers( teamOrUser: string ) {
+	// Handle @singleuser virtual teams.
+	if ( teamOrUser.startsWith( '@' ) ) {
+		return [ teamOrUser.slice( 1 ) ];
+	}
+
+	const team = teamOrUser;
+
+	if ( teamMemberCache[ team ] ) {
+		return teamMemberCache[ team ];
+	}
+
+	const {octokit, owner} = getOctokit()
+
+	let members: string[] = [];
+	try {
+		for await ( const res of octokit.paginate.iterator( octokit.rest.teams.listMembersInOrg, {
+			org: owner,
+			team_slug: team,
+			per_page: 100,
+		} ) ) {
+			members = members.concat( res.data.map( v => v.login ) );
+		}
+	} catch ( error ) {
+		throw new Error(`Failed to query ${ owner } team ${ team } from GitHub: ${error}` );
+	}
+
+	teamMemberCache[ team ] = members;
+	return members;
 }

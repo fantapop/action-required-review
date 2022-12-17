@@ -49,7 +49,7 @@ function buildRequirement(line: string, enforceOnPaths: string[]): RequirementCo
 
     if (enforceOnPaths.includes(path)) {
         return {
-            paths: [ convertToPicomatchCompatiblePath(path) ],
+            path: convertToPicomatchCompatiblePath(path),
             teams,
         };
     }

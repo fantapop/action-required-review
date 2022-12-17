@@ -6,26 +6,21 @@ import Requirement, { isRequirements, RequirementConfig} from './requirement';
 import {parseCodeowners } from './codeowners';
 import { ReportError } from './github';
 
-// https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-location
-const VALID_CODEOWNERS_PATHS = [
-	'CODEOWNERS', '.github/CODEOWNERS', 'docs/CODEOWNERS',
-];
-
 /**
  * Load the requirements yaml file.
  *
  * @returns {Requirement[]} Requirements.
  */
 export function getRequirements(): Requirement[] {
-	let requirementsString = core.getInput('requirements');
 	let enforceOnString = core.getInput('enforce-on');
-	let isCodeowners = false;
 	let enforceOnPaths: string[];
 
 	if (!enforceOnString) {
-		enforceOnPaths = [];
+		throw new ReportError(
+			'Enforce On Config not found',
+			new Error('`enforce-on` input is required'),
+		);
 	} else {
-
 		const enforceOnPathsLoaded = yaml.load(enforceOnString, {
 			onWarning: w => core.warning(`Yaml: ${w.message}`),
 		});
@@ -41,69 +36,54 @@ export function getRequirements(): Requirement[] {
 		}
 	}
 
+	const filename = core.getInput('codeowners-path');
+	if (!filename) {
+		throw new ReportError(
+			'Codeowners Path not found',
+			new Error('`codeowners-path` input is required'),
+		);
+	}
 
-	if (!requirementsString) {
-		const filename = core.getInput('requirements-file');
-		if (!filename) {
-			throw new ReportError(
-				'Requirements are not found',
-				new Error('Either `requirements` or `requirements-file` input is required'),
-			);
-		}
+	const trimmedFilename = filename.trim();
 
-		const trimmedFilename = filename.trim();
-
-		if (VALID_CODEOWNERS_PATHS.includes(trimmedFilename)) {
-			isCodeowners = true;
-		}
-
-		try {
-			core.info('working directory is: ' + process.cwd())
-			core.info('ls .: ' + fs.readdirSync('.'))
-			requirementsString = fs.readFileSync(trimmedFilename, 'utf8');
-		} catch (error) {
-			throw new ReportError(
-				`Requirements file ${trimmedFilename} could not be read`,
-				error,
-			);
-		}
-	} else if (core.getInput('requirements-file')) {
-		core.warning('Ignoring input `requirements-file` because `requirements` was given');
+	let codeownersString
+	try {
+		codeownersString = fs.readFileSync(trimmedFilename, 'utf8');
+	} catch (error) {
+		throw new ReportError(
+			`Requirements file ${trimmedFilename} could not be read`,
+			error,
+		);
 	}
 
 	try {
-		return buildRequirements(requirementsString, isCodeowners, enforceOnPaths);
+		return buildRequirements(codeownersString, enforceOnPaths);
 	} catch (error) {
 		throw new ReportError('Requirements are not valid', error);
 	}
 }
 
-export function buildRequirements(requirementsString: string, isCodeowners: boolean, enforceOnPaths: string[]): Requirement[] {
+function buildName(requirement: RequirementConfig): string {
+	return `PATH(${requirement.path}) => ${requirement.teams.join(" OR ")}`;
+}
+
+export function buildRequirements(codeownersString: string, enforceOnPaths: string[]): Requirement[] {
 	let requirements: RequirementConfig[];
 
-	if (isCodeowners) {
-		core.info("Parsing Codeowners")
-		requirements = parseCodeowners(requirementsString, enforceOnPaths);
+	core.info("Parsing Codeowners")
+	requirements = parseCodeowners(codeownersString, enforceOnPaths);
+	if (core.isDebug()) {
+		core.debug("built requirements: " + requirements)
 	}
-	else {
-		core.info("Parsing Yaml")
-		const requirementsUnverified = yaml.load(requirementsString, {
-			onWarning: w => core.warning(`Yaml: ${w.message}`),
-		});
-		if (isRequirements(requirementsUnverified)) {
-			requirements = requirementsUnverified;
-		}
-		else {
-			throw new Error("Yaml requirements: invalid format");
-		}
-	}
-	core.debug("read requirements: " + requirements)
 
 	if (!Array.isArray(requirements)) {
 		throw new Error(`Requirements file does not contain an array. Input: ${requirements}`);
 	}
 
-	return requirements.map((r, i) => new Requirement({ name: `#${i}`, ...r }));
+	return requirements.map((requirement, i) => new Requirement({
+		name: buildName(requirement),
+		...requirement,
+	}));
 }
 
 export async function satisfiesAllRequirements(requirements: Requirement[], paths: string[], reviewers: string[]): Promise<boolean> {
@@ -122,7 +102,7 @@ export async function satisfiesAllRequirements(requirements: Requirement[], path
 		// should apply
 		for (let i = requirements.length - 1; i >= 0; i--) {
 			const requirement = requirements[i];
-			if (requirement.appliesToPaths([path], matchedPaths)) {
+			if (requirement.appliesToPath(path, matchedPaths)) {
 				if (await requirement.isSatisfied(reviewers)) {
 					core.info(`Requirement ${requirement.name} applies to "${path}": satisfied`);
 				}

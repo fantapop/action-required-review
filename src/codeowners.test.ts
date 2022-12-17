@@ -9,21 +9,21 @@ describe('parseCodeowners', () => {
    #comment with preceding space
         `;
         expect(parseCodeowners(codeownersString, ['/path'] /* enforceOnPaths */)).toEqual([{
-            paths: ['path'],
+            path: 'path',
             teams: ['team']
         }])
     });
     it ('handles trailing comments correctly', () => {
         const codeownersString = '/path team # trailing comment';
         expect(parseCodeowners(codeownersString, ['/path'] /* enforceOnPaths */)).toEqual([{
-            paths: ['path'],
+            path: 'path',
             teams: ['team']
         }])
     });
     it ('parses out all teams', () => {
         const codeownersString = '/path team1 team2 team3';
         expect(parseCodeowners(codeownersString, ['/path'] /* enforceOnPaths */)).toEqual([{
-            paths: ['path'],
+            path: 'path',
             teams: ['team1', 'team2', 'team3']
         }])
     });
@@ -33,10 +33,10 @@ describe('parseCodeowners', () => {
 /path2 team2
 /path3 team3`;
         expect(parseCodeowners(codeownersString, ['/path1', '/path3'] /* enforceOnPaths */)).toEqual([{
-            paths: ['path1'],
+            path: 'path1',
             teams: ['team1']
         }, {
-            paths: ['path3'],
+            path: 'path3',
             teams: ['team3']
         },
     ])

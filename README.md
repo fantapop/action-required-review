@@ -12,6 +12,13 @@ on:
   pull_request:
     types: [ opened, reopened, synchronize ]
 
+# The set of required permissions.  This block will scope down the default
+# GITHUB_TOKEN
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
 jobs:
   check:
     name: Checking required reviews
@@ -22,13 +29,15 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
 
     steps:
-      - uses: Automattic/action-required-review@v3
+      # check out the repo to get access to the CODEOWNERS file
+      - uses: actions/checkout@v3
         with:
-          token: ${{ secrets.REQUIRED_REVIEWS_TOKEN }}
-          requirements: |
-            - paths: unmatched
-              teams:
-                - maintenance
+          ref: trunk
+          path: trunk
+
+      - uses: fantapop/action-required-review@trunk
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ## Usage
@@ -36,34 +45,19 @@ jobs:
 This action is intended to be triggered by the `pull_request_review` event.
 
 ```yaml
-- uses: Automattic/action-required-review
+- uses: fantapop/action-required-review
   with:
-    # Specify the requirements as a YAML string. See below for the format of this string.
-    # The easiest way to generate this is probably to write your YAML, then put the `|`
-    # after the key to make it a string.
-    requirements: |
-      - name: Docs
-        paths:
-         - 'docs/'
-        teams:
-          - documentation
+    # Specify the path to the CODEOWNERS file. 3 locations are supported as dictated here: 
+    # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-location
+    codeowners-path: .github/CODEOWNERS
 
-      - name: Everything else
-        paths: unmatched
-        teams:
-          - maintenance
-
-    # Specify the path to the requirements file. See below for the format of
-    # this file. If the path for this file points to one of the locations of the
-    # CODEOWNERS file, use this file in combination with the enforce-on array to
-    # build the requirements.
-    requirements-file: .github/required-review.yaml
-
-    # Specify paths from the CODEOWNERS file to enforce as review requirements.
-    # This allows having a CODEOWNERS file which adds teams for review but only
-    # forces a review for certain paths. Paths must match the codeowners file
-    # exactly
-    # TODO (fitzner): add warning for paths here that don't match a codeowners line
+    # Specify which paths from the CODEOWNERS file to enforce as review
+    # requirements.  The CODEOWNERS file will dictate the teams and users
+    # associated with a path. Any review reviewer listed in a team or directly
+    # can satisfy the requirement. Paths must match the path in the CODEOWNERS
+    # file exactly.  Paths without teams or users listed remove a requirement
+    # found higher up in the file. These paths must also be added to the
+    # enforce-on array to take affect.
     enforce-on:
       - 'docs/'
       - 'path2/file.txt'

@@ -15690,7 +15690,7 @@ var picomatch = __nccwpck_require__(8569);
 var picomatch_default = /*#__PURE__*/__nccwpck_require__.n(picomatch);
 // EXTERNAL MODULE: ./node_modules/@actions/github/lib/github.js
 var github = __nccwpck_require__(5438);
-;// CONCATENATED MODULE: ./src/team-members.ts
+;// CONCATENATED MODULE: ./src/github.ts
 var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -15709,7 +15709,185 @@ var __asyncValues = (undefined && undefined.__asyncValues) || function (o) {
 };
 
 
-const cache = {};
+var github_State;
+(function (State) {
+    State["ERROR"] = "error";
+    State["FAILURE"] = "failure";
+    State["PENDING"] = "pending";
+    State["SUCCESS"] = "success";
+})(github_State || (github_State = {}));
+;
+const teamMemberCache = {};
+const SUPPORTED_MESSAGE = 'action only supported for pull_request_review and pull_request triggers';
+function getOctokit() {
+    const octokit = github.getOctokit(core.getInput('token', { required: true }));
+    const { payload } = github.context;
+    if (!payload.repository) {
+        throw new Error(`unexpected missing repository, ${SUPPORTED_MESSAGE}`);
+    }
+    if (!payload.pull_request) {
+        throw new Error(`unexpected missing pull_request, ${SUPPORTED_MESSAGE}`);
+    }
+    const owner = payload.repository.owner.login;
+    const repo = payload.repository.name;
+    const pr = payload.pull_request.number;
+    const sha = payload.pull_request.head.sha;
+    return { octokit, owner, repo, pr, sha };
+}
+/**
+ * Fetch the reviewers approving the current PR.
+ *
+ * @returns {string[]} Reviewers.
+ */
+function fetchReviewers() {
+    var _a, e_1, _b, _c;
+    return __awaiter(this, void 0, void 0, function* () {
+        const { octokit, owner, repo, pr } = getOctokit();
+        const reviewers = new Set();
+        try {
+            try {
+                for (var _d = true, _e = __asyncValues(octokit.paginate.iterator(octokit.rest.pulls.listReviews, {
+                    owner: owner,
+                    repo: repo,
+                    pull_number: pr,
+                    per_page: 100,
+                })), _f; _f = yield _e.next(), _a = _f.done, !_a;) {
+                    _c = _f.value;
+                    _d = false;
+                    try {
+                        const res = _c;
+                        res.data.forEach(review => {
+                            // GitHub may return more than one review per user, but only counts the last non-comment one for each.
+                            // "APPROVED" allows merging, while "CHANGES_REQUESTED" and "DISMISSED" do not.
+                            if (review.state === 'APPROVED') {
+                                if (!review.user) {
+                                    core.warning('Unexpected missing user in review object, skipping');
+                                    return;
+                                }
+                                reviewers.add(review.user.login);
+                            }
+                            else if (review.state !== 'COMMENTED') {
+                                if (!review.user) {
+                                    core.warning('Unexpected missing user in review object, skipping');
+                                    return;
+                                }
+                                reviewers.delete(review.user.login);
+                            }
+                        });
+                    }
+                    finally {
+                        _d = true;
+                    }
+                }
+            }
+            catch (e_1_1) { e_1 = { error: e_1_1 }; }
+            finally {
+                try {
+                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+                }
+                finally { if (e_1) throw e_1.error; }
+            }
+        }
+        catch (error) {
+            core.error("error caused reviewer check to fail: " + error);
+            throw new Error(`Failed to query ${owner}/${repo} PR #${pr} reviewers from GitHub: ${error}`);
+        }
+        return [...reviewers].sort();
+    });
+}
+/**
+ * Fetch the paths in the current PR.
+ *
+ * @returns {string[]} Paths.
+ */
+function fetchPaths() {
+    var _a, e_2, _b, _c;
+    return __awaiter(this, void 0, void 0, function* () {
+        const { octokit, owner, repo, pr } = getOctokit();
+        const paths = {};
+        try {
+            try {
+                for (var _d = true, _e = __asyncValues(octokit.paginate.iterator(octokit.rest.pulls.listFiles, {
+                    owner: owner,
+                    repo: repo,
+                    pull_number: pr,
+                    per_page: 100,
+                })), _f; _f = yield _e.next(), _a = _f.done, !_a;) {
+                    _c = _f.value;
+                    _d = false;
+                    try {
+                        const res = _c;
+                        res.data.forEach(file => {
+                            paths[file.filename] = true;
+                            if (file.previous_filename) {
+                                paths[file.previous_filename] = true;
+                            }
+                        });
+                    }
+                    finally {
+                        _d = true;
+                    }
+                }
+            }
+            catch (e_2_1) { e_2 = { error: e_2_1 }; }
+            finally {
+                try {
+                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+                }
+                finally { if (e_2) throw e_2.error; }
+            }
+        }
+        catch (error) {
+            throw new Error(`Failed to query ${owner}/${repo} PR #${pr} files from GitHub: ${error}`);
+        }
+        return Object.keys(paths).sort();
+    });
+}
+/**
+ * Report a status check to GitHub.
+ *
+ * @param {State} state - The status to check
+ * @param {string} description - Description for the status.
+ */
+function github_status(state, description) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const { octokit, owner, repo, sha } = getOctokit();
+        const req = {
+            owner,
+            repo,
+            sha,
+            state,
+            target_url: `https://github.com/${owner}/${repo}/actions/runs/${github.context.runId}`,
+            description,
+            context: core.getInput('status', { required: true }),
+        };
+        if (process.env.CI) {
+            yield octokit.rest.repos.createCommitStatus(req);
+        }
+        else {
+            // eslint-disable-next-line no-console
+            console.dir(req);
+        }
+    });
+}
+/**
+ * Error class for friendly GitHub Action error reporting.
+ *
+ * Use it like
+ * ```
+ * throw ReportError.create( 'Status description', originalError );
+ * ```
+ */
+class ReportError extends Error {
+    constructor(message, cause) {
+        super(message);
+        this._cause = cause;
+        Object.setPrototypeOf(this, ReportError.prototype);
+    }
+    cause() {
+        return this._cause;
+    }
+}
 /**
  * Fetch the members of a team for the purpose of verifying a review Requirement.
  * Special case: Names prefixed with @ are considered to be a one-member team with the named GitHub user.
@@ -15718,53 +15896,48 @@ const cache = {};
  * @returns {string[]} Team members.
  */
 function fetchTeamMembers(teamOrUser) {
-    var _a, e_1, _b, _c;
-    var _d;
+    var _a, e_3, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
         // Handle @singleuser virtual teams.
         if (teamOrUser.startsWith('@')) {
             return [teamOrUser.slice(1)];
         }
         const team = teamOrUser;
-        if (cache[team]) {
-            return cache[team];
+        if (teamMemberCache[team]) {
+            return teamMemberCache[team];
         }
-        const octokit = github.getOctokit(core.getInput('token', { required: true }));
-        const org = (_d = github.context.payload.repository) === null || _d === void 0 ? void 0 : _d.owner.login;
-        if (!org) {
-            throw new Error('repository not found in payload');
-        }
+        const { octokit, owner } = getOctokit();
         let members = [];
         try {
             try {
-                for (var _e = true, _f = __asyncValues(octokit.paginate.iterator(octokit.rest.teams.listMembersInOrg, {
-                    org: org,
+                for (var _d = true, _e = __asyncValues(octokit.paginate.iterator(octokit.rest.teams.listMembersInOrg, {
+                    org: owner,
                     team_slug: team,
                     per_page: 100,
-                })), _g; _g = yield _f.next(), _a = _g.done, !_a;) {
-                    _c = _g.value;
-                    _e = false;
+                })), _f; _f = yield _e.next(), _a = _f.done, !_a;) {
+                    _c = _f.value;
+                    _d = false;
                     try {
                         const res = _c;
                         members = members.concat(res.data.map(v => v.login));
                     }
                     finally {
-                        _e = true;
+                        _d = true;
                     }
                 }
             }
-            catch (e_1_1) { e_1 = { error: e_1_1 }; }
+            catch (e_3_1) { e_3 = { error: e_3_1 }; }
             finally {
                 try {
-                    if (!_e && !_a && (_b = _f.return)) yield _b.call(_f);
+                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
                 }
-                finally { if (e_1) throw e_1.error; }
+                finally { if (e_3) throw e_3.error; }
             }
         }
         catch (error) {
-            throw new Error(`Failed to query ${org} team ${team} from GitHub: ${error}`);
+            throw new Error(`Failed to query ${owner} team ${team} from GitHub: ${error}`);
         }
-        cache[team] = members;
+        teamMemberCache[team] = members;
         return members;
     });
 }
@@ -15897,8 +16070,7 @@ function isRequirement(req) {
     const maybeRequirementConfig = req;
     return maybeRequirementConfig.teams &&
         Array.isArray(maybeRequirementConfig.teams) &&
-        maybeRequirementConfig.paths &&
-        Array.isArray(maybeRequirementConfig.paths);
+        typeof (maybeRequirementConfig.path) === 'string';
 }
 function isRequirements(reqs) {
     return Array.isArray(reqs) && reqs.every(isRequirement);
@@ -15917,16 +16089,15 @@ class Requirement {
     constructor(config) {
         this.name = config.name || 'Unnamed requirement';
         this.teams = config.teams;
-        if (config.paths === 'unmatched') {
-            this.pathsFilter = null;
-        }
-        else if (Array.isArray(config.paths) &&
-            config.paths.length > 0 &&
-            config.paths.every(v => typeof v === 'string')) {
+        // TODO(fitzner): remove path array code below
+        const paths = [config.path];
+        if (Array.isArray(paths) &&
+            paths.length > 0 &&
+            paths.every(v => typeof v === 'string')) {
             // picomatch doesn't combine multiple negated patterns in a way that makes sense here: `!a` and `!b` will pass both `a` and `b`
             // because `a` matches `!b` and `b` matches `!a`. So instead we have to handle the negation ourself: test the (non-negated) patterns in order,
             // with the last match winning. If none match, the opposite of the first pattern's negation is what we need.
-            const filters = config.paths.map(path => {
+            const filters = paths.map(path => {
                 if (path.startsWith('!')) {
                     return {
                         negated: true,
@@ -15969,20 +16140,21 @@ class Requirement {
     /**
      * Test whether this requirement applies to the passed paths.
      *
-     * @param {string[]} paths - Paths to test against.
+     * @param {string} path - Path to test against.
      * @param {string[]} matchedPaths - Paths that have already been matched. Will be modified if true is returned.
      * @returns {boolean} Whether the requirement applies.
      */
-    appliesToPaths(paths, matchedPaths) {
+    appliesToPath(path, matchedPaths) {
         let matches;
         const pathsFilter = this.pathsFilter;
+        // TODO(fitzner): update this code to only ever deal with a single path
         if (pathsFilter) {
-            matches = paths.filter(path => pathsFilter(path));
+            matches = [path].filter(path => pathsFilter(path));
         }
         else {
             // matchedPaths kept around to support the unmatched special value
             core.info('matched paths is being consulted');
-            matches = paths.filter(path => !matchedPaths.includes(path));
+            matches = [path].filter(path => !matchedPaths.includes(path));
             if (matches.length === 0) {
                 core.info("Matches files that haven't been matched yet, but all files have.");
             }
@@ -16057,7 +16229,7 @@ function buildRequirement(line, enforceOnPaths) {
     }
     if (enforceOnPaths.includes(path)) {
         return {
-            paths: [convertToPicomatchCompatiblePath(path)],
+            path: convertToPicomatchCompatiblePath(path),
             teams,
         };
     }
@@ -16080,204 +16252,6 @@ function parseCodeowners(data, enforceOnPaths) {
     return codeOwnersRequirements;
 }
 
-;// CONCATENATED MODULE: ./src/github.ts
-var github_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var github_asyncValues = (undefined && undefined.__asyncValues) || function (o) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var m = o[Symbol.asyncIterator], i;
-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
-};
-
-
-var github_State;
-(function (State) {
-    State["ERROR"] = "error";
-    State["FAILURE"] = "failure";
-    State["PENDING"] = "pending";
-    State["SUCCESS"] = "success";
-})(github_State || (github_State = {}));
-;
-const SUPPORTED_MESSAGE = 'action only supported for pull_request_review and pull_request triggers';
-function getOctokit() {
-    const octokit = github.getOctokit(core.getInput('token', { required: true }));
-    const { payload } = github.context;
-    if (!payload.repository) {
-        throw new Error(`unexpected missing repository, ${SUPPORTED_MESSAGE}`);
-    }
-    if (!payload.pull_request) {
-        throw new Error(`unexpected missing pull_request, ${SUPPORTED_MESSAGE}`);
-    }
-    const owner = payload.repository.owner.login;
-    const repo = payload.repository.name;
-    const pr = payload.pull_request.number;
-    const sha = payload.pull_request.head.sha;
-    return { octokit, owner, repo, pr, sha };
-}
-/**
- * Fetch the reviewers approving the current PR.
- *
- * @returns {string[]} Reviewers.
- */
-function fetchReviewers() {
-    var _a, e_1, _b, _c;
-    return github_awaiter(this, void 0, void 0, function* () {
-        const { octokit, owner, repo, pr } = getOctokit();
-        const reviewers = new Set();
-        try {
-            try {
-                for (var _d = true, _e = github_asyncValues(octokit.paginate.iterator(octokit.rest.pulls.listReviews, {
-                    owner: owner,
-                    repo: repo,
-                    pull_number: pr,
-                    per_page: 100,
-                })), _f; _f = yield _e.next(), _a = _f.done, !_a;) {
-                    _c = _f.value;
-                    _d = false;
-                    try {
-                        const res = _c;
-                        res.data.forEach(review => {
-                            // GitHub may return more than one review per user, but only counts the last non-comment one for each.
-                            // "APPROVED" allows merging, while "CHANGES_REQUESTED" and "DISMISSED" do not.
-                            if (review.state === 'APPROVED') {
-                                if (!review.user) {
-                                    core.warning('Unexpected missing user in review object, skipping');
-                                    return;
-                                }
-                                reviewers.add(review.user.login);
-                            }
-                            else if (review.state !== 'COMMENTED') {
-                                if (!review.user) {
-                                    core.warning('Unexpected missing user in review object, skipping');
-                                    return;
-                                }
-                                reviewers.delete(review.user.login);
-                            }
-                        });
-                    }
-                    finally {
-                        _d = true;
-                    }
-                }
-            }
-            catch (e_1_1) { e_1 = { error: e_1_1 }; }
-            finally {
-                try {
-                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
-                }
-                finally { if (e_1) throw e_1.error; }
-            }
-        }
-        catch (error) {
-            core.error("error caused reviewer check to fail: " + error);
-            throw new Error(`Failed to query ${owner}/${repo} PR #${pr} reviewers from GitHub: ${error}`);
-        }
-        return [...reviewers].sort();
-    });
-}
-/**
- * Fetch the paths in the current PR.
- *
- * @returns {string[]} Paths.
- */
-function fetchPaths() {
-    var _a, e_2, _b, _c;
-    return github_awaiter(this, void 0, void 0, function* () {
-        const { octokit, owner, repo, pr } = getOctokit();
-        const paths = {};
-        try {
-            try {
-                for (var _d = true, _e = github_asyncValues(octokit.paginate.iterator(octokit.rest.pulls.listFiles, {
-                    owner: owner,
-                    repo: repo,
-                    pull_number: pr,
-                    per_page: 100,
-                })), _f; _f = yield _e.next(), _a = _f.done, !_a;) {
-                    _c = _f.value;
-                    _d = false;
-                    try {
-                        const res = _c;
-                        res.data.forEach(file => {
-                            paths[file.filename] = true;
-                            if (file.previous_filename) {
-                                paths[file.previous_filename] = true;
-                            }
-                        });
-                    }
-                    finally {
-                        _d = true;
-                    }
-                }
-            }
-            catch (e_2_1) { e_2 = { error: e_2_1 }; }
-            finally {
-                try {
-                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
-                }
-                finally { if (e_2) throw e_2.error; }
-            }
-        }
-        catch (error) {
-            throw new Error(`Failed to query ${owner}/${repo} PR #${pr} files from GitHub: ${error}`);
-        }
-        return Object.keys(paths).sort();
-    });
-}
-/**
- * Report a status check to GitHub.
- *
- * @param {State} state - The status to check
- * @param {string} description - Description for the status.
- */
-function github_status(state, description) {
-    return github_awaiter(this, void 0, void 0, function* () {
-        const { octokit, owner, repo, sha } = getOctokit();
-        const req = {
-            owner,
-            repo,
-            sha,
-            state,
-            target_url: `https://github.com/${owner}/${repo}/actions/runs/${github.context.runId}`,
-            description,
-            context: core.getInput('status', { required: true }),
-        };
-        if (process.env.CI) {
-            yield octokit.rest.repos.createCommitStatus(req);
-        }
-        else {
-            // eslint-disable-next-line no-console
-            console.dir(req);
-        }
-    });
-}
-/**
- * Error class for friendly GitHub Action error reporting.
- *
- * Use it like
- * ```
- * throw ReportError.create( 'Status description', originalError );
- * ```
- */
-class ReportError extends Error {
-    constructor(message, cause) {
-        super(message);
-        this._cause = cause;
-        Object.setPrototypeOf(this, ReportError.prototype);
-    }
-    cause() {
-        return this._cause;
-    }
-}
-
 ;// CONCATENATED MODULE: ./src/main-helper.ts
 var main_helper_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -16294,22 +16268,16 @@ var main_helper_awaiter = (undefined && undefined.__awaiter) || function (thisAr
 
 
 
-// https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-location
-const VALID_CODEOWNERS_PATHS = [
-    'CODEOWNERS', '.github/CODEOWNERS', 'docs/CODEOWNERS',
-];
 /**
  * Load the requirements yaml file.
  *
  * @returns {Requirement[]} Requirements.
  */
 function getRequirements() {
-    let requirementsString = core.getInput('requirements');
     let enforceOnString = core.getInput('enforce-on');
-    let isCodeowners = false;
     let enforceOnPaths;
     if (!enforceOnString) {
-        enforceOnPaths = [];
+        throw new ReportError('Enforce On Config not found', new Error('`enforce-on` input is required'));
     }
     else {
         const enforceOnPathsLoaded = js_yaml.load(enforceOnString, {
@@ -16325,57 +16293,39 @@ function getRequirements() {
             core.debug("using enforce-on list: " + JSON.stringify(enforceOnPaths));
         }
     }
-    if (!requirementsString) {
-        const filename = core.getInput('requirements-file');
-        if (!filename) {
-            throw new ReportError('Requirements are not found', new Error('Either `requirements` or `requirements-file` input is required'));
-        }
-        const trimmedFilename = filename.trim();
-        if (VALID_CODEOWNERS_PATHS.includes(trimmedFilename)) {
-            isCodeowners = true;
-        }
-        try {
-            core.info('working directory is: ' + process.cwd());
-            core.info('ls .: ' + external_fs_default().readdirSync('.'));
-            requirementsString = external_fs_default().readFileSync(trimmedFilename, 'utf8');
-        }
-        catch (error) {
-            throw new ReportError(`Requirements file ${trimmedFilename} could not be read`, error);
-        }
+    const filename = core.getInput('codeowners-path');
+    if (!filename) {
+        throw new ReportError('Codeowners Path not found', new Error('`codeowners-path` input is required'));
     }
-    else if (core.getInput('requirements-file')) {
-        core.warning('Ignoring input `requirements-file` because `requirements` was given');
+    const trimmedFilename = filename.trim();
+    let codeownersString;
+    try {
+        codeownersString = external_fs_default().readFileSync(trimmedFilename, 'utf8');
+    }
+    catch (error) {
+        throw new ReportError(`Requirements file ${trimmedFilename} could not be read`, error);
     }
     try {
-        return buildRequirements(requirementsString, isCodeowners, enforceOnPaths);
+        return buildRequirements(codeownersString, enforceOnPaths);
     }
     catch (error) {
         throw new ReportError('Requirements are not valid', error);
     }
 }
-function buildRequirements(requirementsString, isCodeowners, enforceOnPaths) {
+function buildName(requirement) {
+    return `PATH(${requirement.path}) => ${requirement.teams.join(" OR ")}`;
+}
+function buildRequirements(codeownersString, enforceOnPaths) {
     let requirements;
-    if (isCodeowners) {
-        core.info("Parsing Codeowners");
-        requirements = parseCodeowners(requirementsString, enforceOnPaths);
+    core.info("Parsing Codeowners");
+    requirements = parseCodeowners(codeownersString, enforceOnPaths);
+    if (core.isDebug()) {
+        core.debug("built requirements: " + requirements);
     }
-    else {
-        core.info("Parsing Yaml");
-        const requirementsUnverified = js_yaml.load(requirementsString, {
-            onWarning: w => core.warning(`Yaml: ${w.message}`),
-        });
-        if (isRequirements(requirementsUnverified)) {
-            requirements = requirementsUnverified;
-        }
-        else {
-            throw new Error("Yaml requirements: invalid format");
-        }
-    }
-    core.debug("read requirements: " + requirements);
     if (!Array.isArray(requirements)) {
         throw new Error(`Requirements file does not contain an array. Input: ${requirements}`);
     }
-    return requirements.map((r, i) => new Requirement(Object.assign({ name: `#${i}` }, r)));
+    return requirements.map((requirement, i) => new Requirement(Object.assign({ name: buildName(requirement) }, requirement)));
 }
 function satisfiesAllRequirements(requirements, paths, reviewers) {
     return main_helper_awaiter(this, void 0, void 0, function* () {
@@ -16392,7 +16342,7 @@ function satisfiesAllRequirements(requirements, paths, reviewers) {
             // should apply
             for (let i = requirements.length - 1; i >= 0; i--) {
                 const requirement = requirements[i];
-                if (requirement.appliesToPaths([path], matchedPaths)) {
+                if (requirement.appliesToPath(path, matchedPaths)) {
                     if (yield requirement.isSatisfied(reviewers)) {
                         core.info(`Requirement ${requirement.name} applies to "${path}": satisfied`);
                     }

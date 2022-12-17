@@ -27,7 +27,7 @@ describe('satisfiesAllRequirements', () => {
 /dir1/file.txt @user1
 /dir2/ @user2
 /dir3/ team1
-    `, true /* isCodeowners */, [
+    `, [
         '/dir1/file.txt',
         '/dir2/',
     ]);
@@ -59,7 +59,7 @@ describe('satisfiesAllRequirements', () => {
         expect(await satisfiesAllRequirements(requirements, [
             'dir2/123.txt',
             'dir3/123.txt',
-        ], ['user2'])).toEqual(true);
+         ], ['user2'])).toEqual(true);
     });
     it('satisfies when required reviewers have reviewed', async () => {
         expect(await satisfiesAllRequirements(requirements, [
@@ -91,7 +91,7 @@ describe('satisfiesAllRequirements', () => {
         const requirements = buildRequirements(`
 /dir2/ @user2
 /dir2/left-out.txt
-        `, true /* isCodeowners */, [
+        `,[
             '/dir2/',
             '/dir2/left-out.txt',
         ]);
@@ -115,7 +115,7 @@ describe('satisfiesAllRequirements', () => {
 /dir2/ @user2
 /dir2/left-out/
 /dir2/left-out/still-required.txt @user2
-        `, true /* isCodeowners */, [
+        `, [
             '/dir2/',
             '/dir2/left-out/',
             '/dir2/left-out/still-required.txt',
@@ -148,7 +148,7 @@ describe('satisfiesAllRequirements', () => {
         const requirements = buildRequirements(`
 /dir2/ @user2
 /dir2/ @user1
-        `, true /* isCodeowners */, [
+        `, [
             '/dir2/',
         ]);
 
