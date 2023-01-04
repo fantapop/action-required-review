@@ -44,7 +44,7 @@ jobs:
     steps:
       # check out the repo to get access to the CODEOWNERS file
       - uses: actions/checkout@v3
-      - uses: fantapop/action-required-review
+      - uses: fantapop/action-required-review@trunk
         with:
           # Specify which paths from the CODEOWNERS file to enforce as review
           # requirements.  The CODEOWNERS file will dictate the teams and users
@@ -53,7 +53,7 @@ jobs:
           # the CODEOWNERS file exactly.  Paths without teams or users listed
           # remove a requirement found higher up in the file. These paths must
           # also be added to the enforce-on array to take affect.
-          enforce-on:
+          enforce-on: |
             - 'docs/'
             - 'path2/file.txt'
 
